@@ -149,9 +149,20 @@
   var rtc = null, rtcTimer = null;
   function stopCam() {
     if (camStream) camStream.getTracks().forEach(function (t) { t.stop(); });
-    camStream = null; camVideo.srcObject = null;
+    camStream = null; camVideo.srcObject = null; // a borrowed stream (preview) is only detached, never stopped
     clearTimeout(rtcTimer); rtcTimer = null;
     if (rtc) { try { rtc.close(); } catch (e) {} rtc = null; }
+  }
+
+  function usePhoneStream(want) {
+    var parentStream = null;
+    try { parentStream = window.parent && window.parent !== window && window.parent.osoreeCamStream; } catch (e) { parentStream = null; }
+    if (parentStream && parentStream.active) {
+      camNote.textContent = '';
+      if (camVideo.srcObject !== parentStream) { camVideo.srcObject = parentStream; camVideo.play().catch(function () {}); }
+    } else camNote.textContent = 'Starting the camera…';
+    // Keep watching: the app may (re)open the camera after this screen was drawn.
+    rtcTimer = setTimeout(function () { if (camKey === want) usePhoneStream(want); }, 700);
   }
 
   // Wi-Fi camera: another phone sends its camera straight to this screen (WebRTC, no internet needed).
@@ -209,8 +220,14 @@
     if (key === camKey) return;
     camKey = key; stopCam(); camNote.textContent = '';
     if (!cam || OVERLAY) return;
-    if (NOCAM) { camNote.textContent = 'Camera is showing on the projector'; return; }
+    if (NOCAM && cam.source !== 'phone') { camNote.textContent = 'Camera is showing on the projector'; return; }
     if (cam.source === 'remote') { startRemote(key); return; }
+    if (cam.source === 'phone') {
+      // The phone app's own camera. Its preview takes the app's stream; its projector opens the camera itself
+      // (both need no network). Screens on other devices receive it over Wi-Fi.
+      if (PREVIEW) { usePhoneStream(key); return; }
+      if (!EMBEDDED) { startRemote(key); return; }
+    }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camNote.textContent = 'This screen cannot use a camera here. Open the screen from this device itself, not over Wi-Fi.'; return; }
     var video = cam.deviceId ? { deviceId: { exact: cam.deviceId } } : { facingMode: cam.facing || 'environment' };
     video.width = { ideal: 1920 }; video.height = { ideal: 1080 };

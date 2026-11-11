@@ -32,7 +32,8 @@ function PhoneCamStatus() {
   const st = useStore((s) => s.camStatus);
   if (!st) return null;
   if (st.error) return <p className="text-sm text-red-600 dark:text-red-400">{st.error}</p>;
-  return <p className="text-sm text-stone-500 dark:text-stone-400">{st.state === 'sending' ? `Camera showing on ${st.screens} ${st.screens === 1 ? 'screen' : 'screens'} (this phone’s preview counts as one).` : 'Starting the camera…'}</p>;
+  if (st.state === 'starting') return <p className="text-sm text-stone-500 dark:text-stone-400">Starting the camera…</p>;
+  return <p className="text-sm text-stone-500 dark:text-stone-400">Camera on: showing here and on the projector (no internet needed){st.wifi ? `, and on ${st.wifi} Wi-Fi ${st.wifi === 1 ? 'screen' : 'screens'}` : ''}.</p>;
 }
 
 function CameraSection() {

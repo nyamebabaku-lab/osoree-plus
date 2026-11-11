@@ -15,10 +15,11 @@ const iceDone = (pc) => new Promise((resolve) => {
 });
 
 // onStatus({ state: 'starting' | 'waiting' | 'sending' | 'unreachable' | 'error', screens, message })
-export async function startWifiCamera({ address, facing, onStatus, onStream }) {
+// `stream` may be given (the phone app's own camera, already open); otherwise the camera is opened here.
+export async function startWifiCamera({ address, facing, onStatus, onStream, stream: given }) {
   const base = normaliseAddress(address);
   if (!base) throw new Error('Type the address shown on the main phone.');
-  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } }, audio: false });
+  const stream = given || await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } }, audio: false });
   onStream?.(stream);
   const peers = new Map();
   let stopped = false, timer = null, misses = 0;
@@ -70,6 +71,6 @@ export async function startWifiCamera({ address, facing, onStatus, onStream }) {
     clearTimeout(timer);
     peers.forEach((pc) => pc.close());
     peers.clear();
-    stream.getTracks().forEach((t) => t.stop());
+    if (!given) stream.getTracks().forEach((t) => t.stop());
   };
 }

@@ -59,7 +59,7 @@ await inp.fill('jn 3 99'); ok('bad verse message', await page.getByText('John 3 
 await inp.fill('jn 3 16; rom 5 8'); await inp.press('Enter'); s = await live();
 ok('combined refs', s.groups.length === 2 && s.groups[1].ref === 'Romans 5:8');
 await inp.fill('rom 5 8; 6 23'); await inp.press('Enter'); s = await live(); ok('same-book shorthand', s.groups[1]?.ref === 'Romans 6:23');
-await page.getByLabel('Compare with another version').selectOption('bsb'); await page.waitForTimeout(300); s = await live();
+await page.getByLabel('Compare with another version').selectOption('bsb'); await page.waitForFunction(() => JSON.parse(localStorage.getItem('osoree-live')).groups?.[0]?.cols?.length === 2, null, { timeout: 8000 }).catch(() => {}); s = await live();
 ok('combined + compare', s.groups.every((g) => g.cols.length === 2 && g.cols[1].abbr === 'BSB'));
 await page.getByLabel('Compare with another version').selectOption('');
 await inp.fill('ps 23'); await inp.press('Enter'); await page.waitForSelector('text=Chapter 23');

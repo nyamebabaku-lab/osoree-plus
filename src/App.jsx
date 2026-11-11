@@ -132,19 +132,34 @@ function LivePanel({ bible, versions }) {
   );
 }
 
-// Phone app, live video with "This phone": open the camera once and share it with every screen
-// (the preview, the projector and Wi-Fi screens) through this phone's own screen server.
+// Phone app, live video with "This phone": the camera is opened here once. The preview (same page family)
+// takes this stream directly and the projector opens the same camera itself, so no network is needed.
+// Screens on other devices get it over Wi-Fi through this phone's screen server.
 function usePhoneCamera() {
   const on = useStore((s) => IS_NATIVE && s.cam.on && s.cam.source === 'phone');
   const facing = useStore((s) => s.cam.facing);
   const setCamStatus = useStore((s) => s.setCamStatus);
   useEffect(() => {
     if (!on) { setCamStatus(null); return undefined; }
-    let stop = null, cancelled = false;
-    Screen.status().then((st) => startWifiCamera({ address: `127.0.0.1:${st.port}`, facing, onStatus: (x) => !cancelled && setCamStatus(x) }))
-      .then((fn) => { if (cancelled) fn(); else stop = fn; })
-      .catch((e) => !cancelled && setCamStatus({ error: e?.name === 'NotAllowedError' ? 'Camera permission is needed.' : e?.message || 'The camera could not start.' }));
-    return () => { cancelled = true; stop?.(); };
+    let stopWifi = null, stream = null, cancelled = false;
+    setCamStatus({ state: 'starting', screens: 0 });
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
+      .then(async (s) => {
+        if (cancelled) { s.getTracks().forEach((t) => t.stop()); return; }
+        stream = s;
+        window.osoreeCamStream = s; // read by the preview frame
+        setCamStatus({ state: 'on' });
+        const st = await Screen.status();
+        const fn = await startWifiCamera({ address: `127.0.0.1:${st.port}`, stream: s, onStatus: (x) => !cancelled && x.screens && setCamStatus({ state: 'on', wifi: x.screens }) });
+        if (cancelled) fn(); else stopWifi = fn;
+      })
+      .catch((e) => !cancelled && setCamStatus({ error: e?.name === 'NotAllowedError' ? 'Camera permission is needed.' : e?.name === 'NotReadableError' ? 'The camera is busy in another app. Close it and try again.' : e?.message || 'The camera could not start.' }));
+    return () => {
+      cancelled = true;
+      stopWifi?.();
+      stream?.getTracks().forEach((t) => t.stop());
+      if (window.osoreeCamStream === stream) delete window.osoreeCamStream;
+    };
   }, [on, facing, setCamStatus]);
 }
 

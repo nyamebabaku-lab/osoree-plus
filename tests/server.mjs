@@ -49,6 +49,31 @@ send({ kind: 'song', title: 'Amazing Grace', lines: ['Amazing grace! How sweet t
 await pv.locator('.text').filter({ hasText: 'Amazing grace' }).waitFor({ timeout: 8000 }).then(() => ok('preview updates on every change', true), () => ok('preview updates on every change', false));
 ok('preview shows no reconnect pill or full-screen hint', await pv.locator('#lost').isHidden() && await pv.locator('#hint').isHidden());
 
+// ---- "This phone" camera: preview and projector without any network ----
+const phoneCam = { kind: 'verse', groups: [{ ref: 'John 3:16', cols: [{ abbr: 'KJV', ref: 'John 3:16', verses: [{ n: 16, t: 'For God so loved the world' }] }] }], style, cam: { source: 'phone', facing: 'environment' }, lt: { bg: '#0b1f3a', opacity: 0.8, fg: '#fff', accent: '#e2b232', size: 'M', align: 'left', font: 'sans-serif' } };
+const app = await b.newContext({ viewport: { width: 400, height: 860 } });
+const appPage = await app.newPage(); appPage.on('pageerror', (e) => errs.push(e.message));
+const rtcCalls = []; app.on('request', (r) => { if (r.url().includes('/rtc/')) rtcCalls.push(r.url()); });
+await appPage.goto('http://127.0.0.1:4872/');
+await appPage.evaluate(async () => {
+  window.osoreeCamStream = await navigator.mediaDevices.getUserMedia({ video: true }); // what the app does when live video is on
+  document.body.innerHTML = '<iframe id="pv" src="./display.html?preview&server=http://127.0.0.1:1" style="width:640px;height:360px;border:0"></iframe>';
+});
+await appPage.waitForTimeout(800);
+await app.setOffline(true); // no Wi-Fi, no data
+await appPage.evaluate((st) => new BroadcastChannel('osoree-output').postMessage(JSON.parse(st)), JSON.stringify(phoneCam));
+await appPage.frameLocator('#pv').locator('#cam video').evaluate((v) => new Promise((r, j) => { const t = Date.now(); (function w() { if (v.videoWidth > 0 && v.srcObject === window.parent.osoreeCamStream) r(); else if (Date.now() - t > 8000) j(); else setTimeout(w, 200); })(); }))
+  .then(() => ok('phone camera in the preview with no network', true), () => ok('phone camera in the preview with no network', false));
+ok('preview lower third with no network', (await appPage.frameLocator('#pv').locator('#lttext .lmain').textContent()) === 'For God so loved the world');
+await app.setOffline(false);
+const proj = await app.newPage(); await proj.goto(u('/?screen'));
+send(phoneCam);
+await proj.waitForFunction(() => document.querySelector('#cam video')?.videoWidth > 0, null, { timeout: 8000 }).then(() => ok('projector opens the phone camera itself', true), () => ok('projector opens the phone camera itself', false));
+ok('preview and projector used no network for the camera', rtcCalls.length === 0, rtcCalls.slice(0, 2).join(' '));
+const wifiScr = await app.newPage(); await wifiScr.goto(u('/', LAN)); await wifiScr.waitForTimeout(1500);
+ok('Wi-Fi screens ask for the phone camera over Wi-Fi', rtcCalls.some((x) => x.includes('/rtc/offer')));
+await app.close();
+
 // ---- Wi-Fi camera ----
 const lt = { bg: '#0b1f3a', opacity: 0.8, fg: '#fff', accent: '#e2b232', size: 'M', align: 'left', font: 'sans-serif' };
 send({ kind: 'verse', groups: [{ ref: 'John 3:16', cols: [{ abbr: 'KJV', ref: 'John 3:16', verses: [{ n: 16, t: 'For God so loved the world' }] }] }], style, cam: { source: 'remote' }, lt });

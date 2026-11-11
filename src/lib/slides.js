@@ -72,8 +72,9 @@ export function screenState(st, { bible, compare, songs, media }) {
   };
   // Shared by every message: the camera, the lower-third look and the scrolling ticker.
   const extra = {
-    // The phone app shares its own camera with every screen the same way a camera phone does ('remote').
-    cam: cam?.on ? { source: cam.source === 'phone' ? 'remote' : cam.source, deviceId: cam.deviceId, facing: cam.facing, mirror: cam.mirror } : null,
+    // 'phone': the preview takes the app's own camera, the projector opens it directly (no network needed),
+    // and Wi-Fi screens receive it over Wi-Fi.
+    cam: cam?.on ? { source: cam.source, deviceId: cam.deviceId, facing: cam.facing, mirror: cam.mirror } : null,
     lt: lt && { ...lt, font: fontStack(lt.font) },
     ticker: ticker?.on && ticker.text.trim() ? { text: ticker.text.trim(), speed: ticker.speed } : null,
   };
