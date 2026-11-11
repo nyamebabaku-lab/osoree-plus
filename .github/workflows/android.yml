@@ -1,0 +1,63 @@
+name: Build Android app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      HAS_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+    steps:
+      - name: Signing key present?
+        if: env.HAS_KEY != 'true'
+        run: echo "::notice::Signing key secrets not set yet — skipping (run osoree-plus-signing/set-github-secrets.sh)."
+      - uses: actions/checkout@v4
+        if: env.HAS_KEY == 'true'
+      - uses: actions/setup-node@v4
+        if: env.HAS_KEY == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        if: env.HAS_KEY == 'true'
+        with:
+          distribution: temurin
+          java-version: 17
+      - if: env.HAS_KEY == 'true'
+        run: npm ci
+      - name: Restore signing key
+        if: env.HAS_KEY == 'true'
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > $RUNNER_TEMP/upload.p12
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/upload.p12" >> $GITHUB_ENV
+      - name: Build signed APK and Play Store bundle
+        if: env.HAS_KEY == 'true'
+        run: |
+          npm run build:app
+          (cd android && chmod +x gradlew && ./gradlew --no-daemon assembleRelease bundleRelease)
+          cp android/app/build/outputs/apk/release/app-release.apk OsoreePlus.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab OsoreePlus.aab
+      - name: Publish release (the download link always gives the newest)
+        if: env.HAS_KEY == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(node -p "require('./package.json').version")
+          if gh release view "v$V" >/dev/null 2>&1; then
+            gh release upload "v$V" OsoreePlus.apk OsoreePlus.aab --clobber
+          else
+            gh release create "v$V" OsoreePlus.apk OsoreePlus.aab --title "Ɔsɔreɛ Plus $V" --latest \
+              --notes "Download OsoreePlus.apk on the Android phone and allow 'Install unknown apps' when asked. OsoreePlus.aab is for the Google Play Store."
+          fi

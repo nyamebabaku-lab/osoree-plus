@@ -1,0 +1,48 @@
+{
+  "name": "osoree-plus",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "build:app": "VITE_TARGET=app vite build && cap sync android",
+    "apk": "npm run build:app && cd android && ./gradlew --no-daemon assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.3",
+    "@capacitor/core": "^6.2.3",
+    "@capacitor/splash-screen": "^6.0.4",
+    "@capacitor/status-bar": "^6.0.3",
+    "@fontsource/plus-jakarta-sans": "^5.1.0",
+    "fflate": "^0.8.2",
+    "lucide-react": "^0.468.0",
+    "pdfjs-dist": "^4.10.38",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^4.0.0",
+    "@capacitor/cli": "^6.2.3",
+    "@fontsource/bebas-neue": "^5.3.0",
+    "@fontsource/dancing-script": "^5.3.0",
+    "@fontsource/lora": "^5.3.0",
+    "@fontsource/merriweather": "^5.3.0",
+    "@fontsource/montserrat": "^5.3.0",
+    "@fontsource/noto-sans": "^5.3.0",
+    "@fontsource/noto-serif": "^5.3.0",
+    "@fontsource/open-sans": "^5.3.0",
+    "@fontsource/oswald": "^5.3.0",
+    "@fontsource/playfair-display": "^5.3.0",
+    "@fontsource/poppins": "^5.3.0",
+    "@fontsource/roboto-slab": "^5.3.0",
+    "@vitejs/plugin-react": "^4.4.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "vite": "^6.3.5",
+    "vite-plugin-pwa": "^0.21.1"
+  }
+}

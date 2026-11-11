@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ɔsɔreɛ Plus Screen</title>
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="stylesheet" href="fonts/fonts.css">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+  .layer { position: fixed; top: 0; right: 0; bottom: 0; left: 0; }
+  #bg { transition: background .3s; }
+  #media { opacity: 0; transition: opacity .35s; }
+  #media img, #media video { position: absolute; width: 100%; height: 100%; object-fit: contain; }
+  #dim { background: #000; opacity: 0; transition: opacity .35s, background .3s; }
+  #stage { display: flex; flex-direction: column; justify-content: center; padding: 6vmin 7vmin; box-sizing: border-box; }
+  #wrap { opacity: 0; transition: opacity .2s; }
+  .group + .group { margin-top: .9em; }
+  .cols { display: grid; gap: 1.4em; align-items: center; }
+  .cols.two { grid-template-columns: 1fr 1fr; }
+  @media (orientation: portrait) { .cols.two { grid-template-columns: 1fr; } }
+  .text { margin: 0; line-height: 1.25; font-weight: 600; text-wrap: balance; overflow-wrap: break-word; }
+  .song .text { line-height: 1.3; }
+  .justify .text { text-wrap: wrap; }
+  .num { position: relative; top: -.55em; margin-right: .3em; font-size: .5em; font-weight: 700; opacity: .8; }
+  .ref { margin-top: .6em; font-size: .5em; font-weight: 700; }
+  .lemma { margin: 0; font-size: 2.2em; line-height: 1.15; font-weight: 600; font-family: 'Noto Serif', 'SBL Hebrew', 'Times New Roman', serif; }
+  .xlit { margin: .2em 0 .5em; font-size: .75em; font-weight: 600; opacity: .85; }
+  .def { margin: 0; line-height: 1.3; font-weight: 600; text-wrap: balance; }
+  .kjv { margin: .5em 0 0; font-size: .6em; line-height: 1.3; opacity: .8; }
+  .note { position: fixed; left: 50%; bottom: 5vh; transform: translateX(-50%); font: 600 16px system-ui, sans-serif; color: #fff; background: rgba(0,0,0,.55); padding: 10px 18px; border-radius: 999px; z-index: 9; }
+  body.screen { cursor: none; }
+  /* live video */
+  #cam { opacity: 0; transition: opacity .4s; background: #000; }
+  #cam video { width: 100%; height: 100%; object-fit: cover; }
+  #cam.mirror video { transform: scaleX(-1); }
+  #camnote { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font: 600 2.4vmin system-ui, sans-serif; color: #fff; opacity: .75; text-align: center; }
+  #lt { position: fixed; left: 4vw; right: 4vw; bottom: 5vh; opacity: 0; transform: translateY(1.5vh); transition: opacity .25s, transform .25s; pointer-events: none; }
+  #lt.on { opacity: 1; transform: none; }
+  #lt.with-ticker { bottom: calc(5vh + 6.2vh); }
+  #ltbox { position: relative; padding: .55em .9em .6em; border-radius: .35em; overflow: hidden; }
+  #ltbg { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
+  #ltbar { position: absolute; left: 0; top: 0; bottom: 0; width: .3em; }
+  #lttext { position: relative; }
+  #lttext .lref { font-size: .62em; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; margin-bottom: .2em; }
+  #lttext .lmain { margin: 0; line-height: 1.22; font-weight: 600; overflow-wrap: break-word; }
+  #lttext .lsub { margin: .15em 0 0; font-size: .62em; font-weight: 600; opacity: .9; }
+  #ticker { position: fixed; left: 0; right: 0; bottom: 0; height: 6.2vh; overflow: hidden; display: none; align-items: center; }
+  #ticker.on { display: flex; }
+  #tickerbg { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
+  #tickertext { position: relative; white-space: nowrap; font: 700 3.4vh system-ui, 'Noto Sans', sans-serif; padding-left: 100vw; animation: tick linear infinite; }
+  @keyframes tick { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+  html.overlay, html.overlay body { background: transparent !important; }
+  html.overlay #bg, html.overlay #media, html.overlay #dim, html.overlay #cam, html.overlay #stage { display: none; }
+</style>
+</head>
+<body>
+<div id="bg" class="layer"></div>
+<div id="cam" class="layer"><video autoplay muted playsinline></video><div id="camnote"></div></div>
+<div id="media" class="layer"></div>
+<div id="dim" class="layer"></div>
+<div id="stage" class="layer"><div id="wrap"></div></div>
+<div id="lt"><div id="ltbox"><div id="ltbg"></div><div id="ltbar"></div><div id="lttext"></div></div></div>
+<div id="ticker"><div id="tickerbg"></div><div id="tickertext"></div></div>
+<div id="hint" class="note" hidden>Click for full screen</div>
+<div id="sound" class="note" hidden>Click to turn on the sound</div>
+<div id="lost" class="note" hidden>Reconnecting to the phone…</div>
+<script>
+// The output screen. It draws only what the operator sends (see src/lib/slides.js → screenState):
+//   { kind: 'black' | 'idle' | 'verse' | 'song' | 'media', style, idle, groups, lines, title, media, video }
+(function () {
+  var Q = new URLSearchParams(location.search);
+  var PREVIEW = Q.has('preview');           // the small preview in the operator app: always silent
+  var EMBEDDED = Q.has('screen');           // a projector driven by the phone app itself
+  var OVERLAY = Q.has('overlay');           // transparent lower third for OBS / vMix
+  var NOCAM = Q.has('nocam');               // the phone's own preview: the camera belongs to the projector
+  if (OVERLAY) document.documentElement.className = 'overlay';
+  var $ = function (id) { return document.getElementById(id); };
+  var bg = $('bg'), mediaBox = $('media'), dim = $('dim'), stage = $('stage'), wrap = $('wrap');
+  var current = null, textKey = '', timer = null;
+  var mediaKey = '', mediaEl = null, videoSeq = null, needsSound = false;
+  if (!PREVIEW && !Q.has('overlay')) document.body.className = 'screen';
+
+  // ---- pictures and videos ----------------------------------------------------------------
+  // "idb:<id>" files live in this browser's IndexedDB (shared with the operator page);
+  // any other src is a path the phone app serves.
+  var blobUrls = {};
+  function resolve(src, done) {
+    if (src.indexOf('idb:') !== 0) return done(src);
+    if (blobUrls[src]) return done(blobUrls[src]);
+    var r = indexedDB.open('osoree-plus', 2);
+    r.onupgradeneeded = function () { ['bibles', 'media'].forEach(function (s) { if (!r.result.objectStoreNames.contains(s)) r.result.createObjectStore(s, { keyPath: 'id' }); }); };
+    r.onsuccess = function () {
+      var d = r.result;
+      try {
+        var g = d.transaction('media', 'readonly').objectStore('media').get(src.slice(4));
+        g.onsuccess = function () { d.close(); if (g.result) { blobUrls[src] = URL.createObjectURL(g.result.blob); done(blobUrls[src]); } };
+      } catch (e) { d.close(); }
+    };
+  }
+
+  // m: { src, kind, fit } or null. role: 'media' (live, with sound), 'idle' or 'bg' (silent loops).
+  function showMedia(m, role, video) {
+    var key = m ? role + '|' + m.src : '';
+    if (key !== mediaKey) {
+      mediaKey = key;
+      if (mediaEl) { if (mediaEl.pause) mediaEl.pause(); mediaEl.remove(); mediaEl = null; }
+      $('sound').hidden = true; needsSound = false; videoSeq = null;
+      mediaBox.style.opacity = 0;
+      if (!m) return;
+      var el = document.createElement(m.kind === 'video' ? 'video' : 'img');
+      if (m.kind === 'video') { el.playsInline = true; el.setAttribute('playsinline', ''); el.preload = 'auto'; }
+      el.onload = el.onloadeddata = function () { if (mediaEl === el) mediaBox.style.opacity = 1; };
+      mediaEl = el;
+      mediaBox.appendChild(el);
+      resolve(m.src, function (url) { if (mediaEl === el) { el.src = url; if (el.play) controlVideo(el, role, video); } });
+    }
+    if (!mediaEl) return;
+    mediaEl.style.objectFit = role === 'bg' ? 'cover' : (m.fit || 'contain');
+    if (mediaEl.play && mediaEl.src) controlVideo(mediaEl, role, video);
+  }
+
+  function controlVideo(el, role, video) {
+    var live = role === 'media';
+    video = video || {};
+    el.loop = live ? !!video.loop : true;
+    el.muted = PREVIEW || !live || !!video.muted || needsSound;
+    if (live && video.seq !== videoSeq) { if (videoSeq !== null) el.currentTime = 0; videoSeq = video.seq; }
+    if (live && video.playing === false) { el.pause(); return; }
+    if (!el.paused) return;
+    var p = el.play();
+    if (p && p.catch) p.catch(function () {
+      // The browser wants a click before it plays sound: play silently and ask for one.
+      if (el.muted) return;
+      needsSound = true; el.muted = true; el.play().catch(function () {});
+      $('sound').hidden = false;
+    });
+  }
+  document.addEventListener('click', function () {
+    if (!needsSound) return;
+    needsSound = false; $('sound').hidden = true;
+    if (current) paint(current);
+  });
+
+  // ---- live camera -------------------------------------------------------------------------
+  var camBox = $('cam'), camVideo = camBox.querySelector('video'), camNote = $('camnote');
+  var camKey = '', camStream = null;
+  var rtc = null, rtcTimer = null;
+  function stopCam() {
+    if (camStream) camStream.getTracks().forEach(function (t) { t.stop(); });
+    camStream = null; camVideo.srcObject = null;
+    clearTimeout(rtcTimer); rtcTimer = null;
+    if (rtc) { try { rtc.close(); } catch (e) {} rtc = null; }
+  }
+
+  // Wi-Fi camera: another phone sends its camera straight to this screen (WebRTC, no internet needed).
+  // The main phone's screen server only passes the two short introduction messages (offer and answer).
+  function startRemote(want) {
+    if (location.protocol !== 'http:' || location.pathname !== '/' || !window.RTCPeerConnection) {
+      camNote.textContent = 'The Wi-Fi camera shows on the main phone’s projector and on its Wi-Fi screens.'; return;
+    }
+    var id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    var pc = new RTCPeerConnection({ iceServers: [] });
+    rtc = pc;
+    var retry = function (ms) {
+      if (rtc !== pc || camKey !== want) return;
+      try { pc.close(); } catch (e) {}
+      rtc = null;
+      rtcTimer = setTimeout(function () { if (camKey === want) startRemote(want); }, ms);
+    };
+    pc.addTransceiver('video', { direction: 'recvonly' });
+    pc.ontrack = function (e) {
+      camVideo.srcObject = e.streams && e.streams[0] ? e.streams[0] : new MediaStream([e.track]);
+      camVideo.play().catch(function () {});
+      camNote.textContent = '';
+    };
+    var lostAt = 0;
+    pc.onconnectionstatechange = function () {
+      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') retry(1500);
+      if (pc.connectionState === 'disconnected') { lostAt = Date.now(); setTimeout(function () { if (pc.connectionState === 'disconnected' && Date.now() - lostAt >= 2900) retry(500); }, 3000); }
+    };
+    camNote.textContent = 'Waiting for the camera phone…';
+    pc.createOffer().then(function (o) { return pc.setLocalDescription(o); }).then(function () {
+      return new Promise(function (done) {
+        if (pc.iceGatheringState === 'complete') return done();
+        var t = setTimeout(done, 2500);
+        pc.addEventListener('icegatheringstatechange', function () { if (pc.iceGatheringState === 'complete') { clearTimeout(t); done(); } });
+      });
+    }).then(function () {
+      return fetch('/rtc/offer?id=' + id, { method: 'POST', body: pc.localDescription.sdp });
+    }).then(function () {
+      var tries = 0;
+      (function poll() {
+        if (rtc !== pc || camKey !== want) return;
+        fetch('/rtc/answer?id=' + id, { cache: 'no-store' }).then(function (r) { return r.status === 200 ? r.text() : null; }).then(function (sdp) {
+          if (rtc !== pc) return;
+          if (sdp) return pc.setRemoteDescription({ type: 'answer', sdp: sdp });
+          if (++tries > 40) return retry(500); // nobody answered in ~30 s: ask again
+          rtcTimer = setTimeout(poll, 750);
+        }).catch(function () { retry(2000); });
+      })();
+    }).catch(function () { retry(2000); });
+  }
+  function showCam(cam) {
+    var key = cam ? [cam.source, cam.deviceId, cam.facing].join('|') : '';
+    camBox.className = 'layer' + (cam && cam.mirror ? ' mirror' : '');
+    camBox.style.opacity = cam ? 1 : 0;
+    if (key === camKey) return;
+    camKey = key; stopCam(); camNote.textContent = '';
+    if (!cam || OVERLAY) return;
+    if (NOCAM) { camNote.textContent = 'Camera is showing on the projector'; return; }
+    if (cam.source === 'remote') { startRemote(key); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camNote.textContent = 'This screen cannot use a camera here. Open the screen from this device itself, not over Wi-Fi.'; return; }
+    var video = cam.deviceId ? { deviceId: { exact: cam.deviceId } } : { facingMode: cam.facing || 'environment' };
+    video.width = { ideal: 1920 }; video.height = { ideal: 1080 };
+    var want = key;
+    navigator.mediaDevices.getUserMedia({ video: video, audio: false }).then(function (stream) {
+      if (camKey !== want) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+      camStream = stream; camVideo.srcObject = stream; camVideo.play().catch(function () {});
+    }, function (err) {
+      if (camKey === want) camNote.textContent = 'Camera not available: ' + (err && err.name === 'NotAllowedError' ? 'permission was refused' : err && err.name === 'NotFoundError' ? 'no camera found' : (err && err.message) || 'unknown error');
+    });
+  }
+
+  // ---- lower third + ticker ---------------------------------------------------------------
+  var lt = $('lt'), ltText = $('lttext'), ticker = $('ticker'), tickerText = $('tickertext');
+  var LT_CAP = { S: 0.045, M: 0.058, L: 0.075 }, LT_MAX = { S: 0.24, M: 0.32, L: 0.42 };
+  function hexA(hex, a) {
+    var h = (hex || '#000').replace('#', ''); if (h.length === 3) h = h.replace(/./g, '$&$&');
+    var n = parseInt(h, 16); return 'rgba(' + (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255) + ',' + (a == null ? 0.8 : a) + ')';
+  }
+  // What a message looks like in one bar: a small label, the main text and an optional second line.
+  function lowerContent(s) {
+    if (s.kind === 'verse') {
+      var parts = s.groups.map(function (g) { var c = g.cols[0]; return { ref: (c.ref || g.ref) + (c.abbr ? ' · ' + c.abbr : ''), text: c.verses.map(function (v) { return v.t; }).join(' ') }; });
+      return { label: parts.map(function (p) { return p.ref; }).join('  |  '), main: parts.map(function (p) { return p.text; }).join('  ·  ') };
+    }
+    if (s.kind === 'song') return { label: s.title, main: s.lines.join(' / ') };
+    if (s.kind === 'strongs') { var e = s.entry || {}; return { label: "Strong's " + e.num + (s.word ? ' · “' + s.word + '”' : '') + (s.ref ? ' · ' + s.ref : ''), main: (e.lemma || '') + '  ' + (e.xlit || '') + ' — ' + (e.def || '') }; }
+    if (s.kind === 'name') return { main: s.name, sub: s.title, big: true };
+    return null;
+  }
+  function showLower(s) {
+    var L = s.lt || {};
+    var c = lowerContent(s);
+    if (!c) { lt.className = ''; return; }
+    var st = s.style || {};
+    ltText.innerHTML = '';
+    if (c.label && st.showRef !== false) { var lab = el('div', 'lref', c.label); lab.style.color = L.accent || '#e2b232'; ltText.appendChild(lab); }
+    var main = el('p', 'lmain', c.main); if (c.big) main.style.fontWeight = 800; ltText.appendChild(main);
+    if (c.sub) ltText.appendChild(el('p', 'lsub', c.sub));
+    $('ltbg').style.background = hexA(L.bg || '#0b1f3a', L.opacity);
+    $('ltbar').style.background = L.accent || '#e2b232';
+    ltText.style.color = L.fg || '#fff';
+    ltText.style.fontFamily = L.font || 'system-ui, sans-serif';
+    ltText.style.textAlign = L.align === 'center' ? 'center' : 'left';
+    main.style.textTransform = st.upper ? 'uppercase' : 'none';
+    lt.className = 'on' + (s.ticker ? ' with-ticker' : '');
+    // Largest text that keeps the bar within its share of the screen.
+    var H = window.innerHeight, cap = H * (LT_CAP[L.size] || LT_CAP.M), max = H * (LT_MAX[L.size] || LT_MAX.M);
+    var box = $('ltbox'), lo = 8, hi = cap;
+    lt.style.fontSize = hi + 'px';
+    if (box.offsetHeight > max) {
+      for (var i = 0; i < 12; i++) { var mid = (lo + hi) / 2; lt.style.fontSize = mid + 'px'; if (box.offsetHeight <= max) lo = mid; else hi = mid; }
+      lt.style.fontSize = lo + 'px';
+    }
+  }
+  var tickerKey = '';
+  function showTicker(s) {
+    var t = s.kind !== 'black' && s.ticker;
+    ticker.className = t ? 'on' : '';
+    if (!t) { tickerKey = ''; return; }
+    var L = s.lt || {};
+    $('tickerbg').style.background = hexA(L.bg || '#0b1f3a', Math.max(0.6, L.opacity == null ? 0.8 : L.opacity));
+    tickerText.style.color = L.fg || '#fff';
+    var key = t.text + '|' + t.speed;
+    if (key === tickerKey) return;
+    tickerKey = key;
+    tickerText.textContent = t.text;
+    // Same reading speed whatever the length: roughly 9 characters a second at normal speed.
+    tickerText.style.animationDuration = Math.max(8, (t.text.length + 60) / (9 * (t.speed || 1))) + 's';
+    tickerText.style.animationName = 'none'; void tickerText.offsetWidth; tickerText.style.animationName = '';
+  }
+
+  // ---- text -------------------------------------------------------------------------------
+  function el(tag, cls, text) { var e = document.createElement(tag); e.className = cls; if (text != null) e.textContent = text; return e; }
+
+  var CAP = { S: 0.075, M: 0.1, L: 0.14, XL: 0.2 };
+  function fit(cap) {
+    var cs = getComputedStyle(stage);
+    var room = stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    var lo = 8, hi = Math.max(12, stage.clientHeight * cap);
+    wrap.style.fontSize = hi + 'px';
+    if (wrap.scrollHeight <= room) return;
+    for (var i = 0; i < 14; i++) {
+      var mid = (lo + hi) / 2;
+      wrap.style.fontSize = mid + 'px';
+      if (wrap.scrollHeight <= room) lo = mid; else hi = mid;
+    }
+    wrap.style.fontSize = lo + 'px';
+  }
+
+  function buildText(s, st) {
+    wrap.innerHTML = '';
+    wrap.className = (s.kind === 'song' ? 'song ' : '') + (st.align === 'justify' ? 'justify' : '');
+    wrap.style.color = st.fg || '#fff';
+    wrap.style.textAlign = st.align || 'center';
+    wrap.style.fontFamily = st.font || 'Georgia, serif';
+    wrap.style.textShadow = st.bgMedia && st.shadow !== false ? '0 .04em .25em rgba(0,0,0,.75)' : 'none';
+    var accent = st.accent || '#e2b232';
+    var text = function () { var p = el('p', 'text'); p.style.textTransform = st.upper ? 'uppercase' : 'none'; return p; };
+    if (s.kind === 'song') {
+      var p = text();
+      s.lines.forEach(function (line, i) { if (i) p.appendChild(document.createElement('br')); p.appendChild(document.createTextNode(line)); });
+      wrap.appendChild(p);
+      if (st.showRef !== false && s.title) { var r = el('div', 'ref', s.title); r.style.color = accent; wrap.appendChild(r); }
+      return;
+    }
+    if (s.kind === 'name') {
+      var nm = text(); nm.textContent = s.name; wrap.appendChild(nm);
+      if (s.title) { var tt = el('div', 'ref', s.title); tt.style.color = accent; tt.style.fontSize = '.6em'; wrap.appendChild(tt); }
+      return;
+    }
+    if (s.kind === 'strongs') {
+      var e = s.entry || {};
+      var lemma = el('p', 'lemma', e.lemma || ''); lemma.dir = 'auto'; lemma.style.color = accent; wrap.appendChild(lemma);
+      wrap.appendChild(el('p', 'xlit', [e.xlit, e.pron && '(' + e.pron + ')'].filter(Boolean).join('  ')));
+      var d = text(); d.className = 'def'; d.textContent = e.def || ''; wrap.appendChild(d);
+      if (e.kjv) wrap.appendChild(el('p', 'kjv', 'KJV: ' + e.kjv));
+      if (st.showRef !== false) {
+        var r2 = el('div', 'ref', "Strong's " + e.num + (s.word ? '  ·  “' + s.word + '”' : '') + (s.ref ? '  ·  ' + s.ref : ''));
+        r2.style.color = accent; wrap.appendChild(r2);
+      }
+      return;
+    }
+    s.groups.forEach(function (g) {
+      var group = el('div', 'group'), cols = el('div', 'cols' + (g.cols.length > 1 ? ' two' : ''));
+      g.cols.forEach(function (c) {
+        var part = el('div', 'part'), p = text();
+        c.verses.forEach(function (v, i) {
+          if (c.verses.length > 1) p.appendChild(el('span', 'num', v.n));
+          p.appendChild(document.createTextNode((v.t || '—') + (i < c.verses.length - 1 ? ' ' : '')));
+        });
+        part.appendChild(p);
+        if (st.showRef !== false) { var r = el('div', 'ref', (c.ref || g.ref) + (c.abbr ? '  ·  ' + c.abbr : '')); r.style.color = accent; part.appendChild(r); }
+        cols.appendChild(part);
+      });
+      group.appendChild(cols);
+      wrap.appendChild(group);
+    });
+  }
+
+  function paint(s) {
+    var st = s.style || {};
+    var hasText = s.kind === 'verse' || s.kind === 'song' || s.kind === 'strongs' || s.kind === 'name';
+    var lower = OVERLAY || !!s.cam;   // live video and the streaming overlay put text in the lower third
+    showTicker(s);
+    if (lower) {
+      showCam(s.kind === 'black' ? null : s.cam);
+      bg.style.background = s.kind === 'black' ? '#000' : (s.cam ? '#000' : (st.bg || '#000'));
+      if (s.kind === 'media') showMedia(s.media, 'media', s.video); else showMedia(null);
+      dim.style.opacity = 0;
+      wrap.style.opacity = 0;
+      if (hasText) showLower(s); else lt.className = '';
+      return;
+    }
+    showCam(null);
+    lt.className = '';
+    stage.style.paddingBottom = s.ticker ? 'calc(6vmin + 6.2vh)' : '';
+    bg.style.background = s.kind === 'black' ? '#000' : (st.bg || '#000');
+    if (s.kind === 'black') showMedia(null);
+    else if (s.kind === 'media') showMedia(s.media, 'media', s.video);
+    else if (s.kind === 'idle') showMedia(s.idle, 'idle');
+    else showMedia(st.bgMedia, 'bg');
+    // The picture behind text fades into the chosen background colour so the words stay clear.
+    dim.style.background = st.bg || '#000';
+    dim.style.opacity = hasText && st.bgMedia ? (st.blend == null ? 0.45 : st.blend) : 0;
+    if (!hasText) { wrap.style.opacity = 0; return; }
+    buildText(s, st);
+    var cap = CAP[st.size] || CAP.M;
+    fit(cap);
+    wrap.style.opacity = 1;
+    // Bundled fonts may still be loading: measure again once they are in.
+    if (document.fonts && document.fonts.load) {
+      document.fonts.load('600 40px ' + (st.font || 'serif'), wrap.textContent.slice(0, 200)).then(function () { if (current === s) fit(cap); }, function () {});
+    }
+  }
+
+  function render(s) {
+    if (!s) return;
+    var key = s.kind + '|' + JSON.stringify(s.groups || s.lines || (s.entry && s.entry.num + s.ref) || s.name || '') + '|' + !!(s.cam || OVERLAY);
+    var changed = key !== textKey;
+    current = s; textKey = key;
+    clearTimeout(timer);
+    var isText = s.kind === 'verse' || s.kind === 'song' || s.kind === 'strongs' || s.kind === 'name';
+    if (changed && isText && wrap.style.opacity === '1') {
+      wrap.style.opacity = 0;
+      timer = setTimeout(function () { paint(s); }, 180);
+    } else paint(s);
+  }
+  window.osoreeRender = render; // the phone app can also call this directly
+
+  try { render(JSON.parse(localStorage.getItem('osoree-live'))); } catch (e) {}
+  if ('BroadcastChannel' in window) new BroadcastChannel('osoree-output').onmessage = function (e) { render(e.data); };
+  window.addEventListener('storage', function (e) { if (e.key === 'osoree-live' && e.newValue) try { render(JSON.parse(e.newValue)); } catch (err) {} });
+  window.addEventListener('resize', function () { if (current) paint(current); });
+
+  // Opened from the phone's address (Wi-Fi screen or the phone's own projector): follow the phone.
+  var remote = location.protocol === 'http:' && location.pathname === '/' && window.self === window.top;
+  if (remote) {
+    var take = function (text) { try { render(JSON.parse(text)); } catch (e) {} };
+    var lost = $('lost');
+    if ('EventSource' in window) {
+      var es = new EventSource('/events');
+      es.onmessage = function (e) { lost.hidden = true; take(e.data); };
+      es.onopen = function () { lost.hidden = true; };
+      es.onerror = function () { lost.hidden = EMBEDDED || PREVIEW; };
+    } else {
+      setInterval(function () {
+        var x = new XMLHttpRequest();
+        x.open('GET', '/state?' + Date.now());
+        x.onload = function () { lost.hidden = true; take(x.responseText); };
+        x.onerror = function () { lost.hidden = EMBEDDED || PREVIEW; };
+        x.send();
+      }, 700);
+    }
+  }
+
+  if (!PREVIEW && !EMBEDDED && !OVERLAY && window.self === window.top && location.protocol !== 'file:' && document.documentElement.requestFullscreen) {
+    var hint = $('hint');
+    hint.hidden = false;
+    setTimeout(function () { hint.hidden = true; }, 6000);
+    document.addEventListener('click', function () {
+      hint.hidden = true;
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(function () {});
+    });
+  }
+})();
+</script>
+</body>
+</html>

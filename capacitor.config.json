@@ -1,0 +1,10 @@
+{
+  "appId": "com.osoree.plus",
+  "appName": "Ɔsɔreɛ Plus",
+  "webDir": "dist-app",
+  "android": { "backgroundColor": "#0e0f13", "allowMixedContent": true },
+  "plugins": {
+    "SplashScreen": { "launchShowDuration": 800, "launchAutoHide": true, "backgroundColor": "#0e0f13", "showSpinner": false },
+    "StatusBar": { "backgroundColor": "#0e0f13", "style": "DARK" }
+  }
+}
