@@ -39,6 +39,16 @@ await scr.waitForFunction(() => document.querySelector('.text')?.textContent.inc
 send({ kind: 'media', media: { src: '/_capacitor_file_' + MEDIA + '/abc.webm', kind: 'video', fit: 'cover' }, video: { playing: true, seq: 1, loop: true, muted: false }, style });
 await scr.waitForFunction(() => document.querySelector('#media video')?.currentTime > 0.3, null, { timeout: 10000 }).then(() => ok('video streams over Wi-Fi', true), () => ok('video streams over Wi-Fi', false));
 
+// ---- the phone app's preview: this page inside a frame of the app (another origin), as on the phone ----
+const host = await page('http://127.0.0.1:4872/', 400, 860);
+await host.evaluate((src) => { document.body.innerHTML = `<iframe id="pv" src="${src}" allow="camera; autoplay" style="width:640px;height:360px;border:0"></iframe>`; }, u('/?preview'));
+const pv = host.frameLocator('#pv');
+send({ kind: 'verse', groups: [{ ref: 'Psalms 23:1', cols: [{ abbr: 'KJV', ref: 'Psalms 23:1', verses: [{ n: 1, t: 'The LORD is my shepherd' }] }] }], style });
+await pv.locator('.text').filter({ hasText: 'The LORD is my shepherd' }).waitFor({ timeout: 8000 }).then(() => ok('preview inside the app follows the phone', true), () => ok('preview inside the app follows the phone', false));
+send({ kind: 'song', title: 'Amazing Grace', lines: ['Amazing grace! How sweet the sound'], style });
+await pv.locator('.text').filter({ hasText: 'Amazing grace' }).waitFor({ timeout: 8000 }).then(() => ok('preview updates on every change', true), () => ok('preview updates on every change', false));
+ok('preview shows no reconnect pill or full-screen hint', await pv.locator('#lost').isHidden() && await pv.locator('#hint').isHidden());
+
 // ---- Wi-Fi camera ----
 const lt = { bg: '#0b1f3a', opacity: 0.8, fg: '#fff', accent: '#e2b232', size: 'M', align: 'left', font: 'sans-serif' };
 send({ kind: 'verse', groups: [{ ref: 'John 3:16', cols: [{ abbr: 'KJV', ref: 'John 3:16', verses: [{ n: 16, t: 'For God so loved the world' }] }] }], style, cam: { source: 'remote' }, lt });
@@ -49,13 +59,23 @@ await cam.getByLabel('Main phone address').fill(`${LAN}:${port}`); await cam.get
 await scr.waitForFunction(() => { const v = document.querySelector('#cam video'); return v && v.videoWidth > 0 && !document.getElementById('camnote').textContent; }, null, { timeout: 20000 })
   .then(() => ok('camera phone picture reaches the screen', true), () => ok('camera phone picture reaches the screen', false));
 ok('lower third over the Wi-Fi camera', (await scr.locator('#lttext .lmain').textContent()) === 'For God so loved the world');
-await cam.waitForSelector('text=Sending to 1 screen', { timeout: 8000 }).then(() => ok('camera phone shows 1 screen', true), () => ok('camera phone shows 1 screen', false));
+await cam.waitForSelector('text=Sending to 2 screens', { timeout: 8000 }).then(() => ok('camera phone shows 2 screens (screen + preview)', true), () => ok('camera phone shows 2 screens (screen + preview)', false));
 ok('main phone sees the camera phone', (await (await fetch(u('/rtc/status'))).json()).camera === true);
 await scr.screenshot({ path: path.join(here, 'out', 'wifi-camera.png') });
 await cam.screenshot({ path: path.join(here, 'out', 'camera-mode.png') });
+await pv.locator('#cam video').evaluate((v) => new Promise((r, j) => { const t = Date.now(); (function w() { if (v.videoWidth > 0) r(); else if (Date.now() - t > 20000) j(); else setTimeout(w, 200); })(); }))
+  .then(() => ok('camera shows in the phone preview too', true), () => ok('camera shows in the phone preview too', false));
+// the phone app's preview (same origin as the app, told where the server is) also gets the camera
+const appPv = await page(`http://127.0.0.1:4872/display.html?preview&server=${encodeURIComponent(u(''))}`);
+await appPv.evaluate((st) => { localStorage.setItem('osoree-live', st); new BroadcastChannel('osoree-output').postMessage(JSON.parse(st)); },
+  JSON.stringify({ kind: 'verse', groups: [{ ref: 'John 3:16', cols: [{ abbr: 'KJV', ref: 'John 3:16', verses: [{ n: 16, t: 'For God so loved the world' }] }] }], style, cam: { source: 'remote' }, lt }));
+await appPv.reload();
+await appPv.waitForFunction(() => document.querySelector('#cam video')?.videoWidth > 0, null, { timeout: 20000 }).then(() => ok('app preview gets the camera through the server address', true), () => ok('app preview gets the camera through the server address', false));
+ok('app preview shows the lower third', (await appPv.locator('#lttext .lmain').textContent()) === 'For God so loved the world');
+await appPv.close();
 const scr2 = await page(u('/?screen'));
 await scr2.waitForFunction(() => document.querySelector('#cam video')?.videoWidth > 0, null, { timeout: 20000 }).then(() => ok('second screen also gets the camera', true), () => ok('second screen also gets the camera', false));
-await cam.waitForSelector('text=Sending to 2 screens', { timeout: 8000 }).then(() => ok('camera phone shows 2 screens', true), () => ok('camera phone shows 2 screens', false));
+await cam.waitForSelector('text=Sending to 3 screens', { timeout: 8000 }).then(() => ok('camera phone shows 3 screens (incl. preview)', true), () => ok('camera phone shows 3 screens (incl. preview)', false));
 // camera phone stops, then starts again: screens reconnect by themselves
 await cam.getByRole('button', { name: 'Stop sending' }).click();
 await scr.waitForFunction(() => document.getElementById('camnote').textContent.includes('Waiting'), null, { timeout: 15000 }).then(() => ok('screen notices the camera stopped', true), () => ok('screen notices the camera stopped', false));

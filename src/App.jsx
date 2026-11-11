@@ -45,13 +45,13 @@ const Toggle = ({ on, onClick, label, children }) => (
   <button onClick={onClick} aria-pressed={on} aria-label={label} title={label} className={`btn min-h-9 px-3 ${on ? 'bg-gold-400/25 text-gold-700 ring-1 ring-gold-500 dark:text-gold-300' : 'bg-paper-200 text-stone-600 dark:bg-night-800 dark:text-stone-300'}`}>{children}</button>
 );
 
-// The preview. In the phone app it loads the live screen from the phone's own screen server, exactly as the
-// projector does, so the camera (this phone's or a camera phone's) shows on the phone as well.
+// The preview gets what to show straight from this app (as every same-device screen does). In the phone app it
+// is also told where the phone's screen server is, so the live camera picture shows on the phone as well.
 function usePreviewUrl() {
   const [url, setUrl] = useState(IS_NATIVE ? '' : './display.html?preview');
   useEffect(() => {
     if (!IS_NATIVE) return;
-    Screen.status().then((st) => setUrl(st.port ? `http://127.0.0.1:${st.port}/?preview` : './display.html?preview&nocam')).catch(() => setUrl('./display.html?preview&nocam'));
+    Screen.status().then((st) => setUrl(st.port ? `./display.html?preview&server=${encodeURIComponent(`http://127.0.0.1:${st.port}`)}` : './display.html?preview&nocam')).catch(() => setUrl('./display.html?preview&nocam'));
   }, []);
   return url;
 }

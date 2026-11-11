@@ -74,6 +74,7 @@
   var EMBEDDED = Q.has('screen');           // a projector driven by the phone app itself
   var OVERLAY = Q.has('overlay');           // transparent lower third for OBS / vMix
   var NOCAM = Q.has('nocam');               // the phone's own preview: the camera belongs to the projector
+  var SERVER = Q.get('server') || '';       // the phone app's preview: where to find the Wi-Fi camera
   if (OVERLAY) document.documentElement.className = 'overlay';
   var $ = function (id) { return document.getElementById(id); };
   var bg = $('bg'), mediaBox = $('media'), dim = $('dim'), stage = $('stage'), wrap = $('wrap');
@@ -156,7 +157,7 @@
   // Wi-Fi camera: another phone sends its camera straight to this screen (WebRTC, no internet needed).
   // The main phone's screen server only passes the two short introduction messages (offer and answer).
   function startRemote(want) {
-    if (location.protocol !== 'http:' || location.pathname !== '/' || !window.RTCPeerConnection) {
+    if (!(SERVER || (location.protocol === 'http:' && location.pathname === '/')) || !window.RTCPeerConnection) {
       camNote.textContent = 'The Wi-Fi camera shows on the main phone’s projector and on its Wi-Fi screens.'; return;
     }
     var id = Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -187,12 +188,12 @@
         pc.addEventListener('icegatheringstatechange', function () { if (pc.iceGatheringState === 'complete') { clearTimeout(t); done(); } });
       });
     }).then(function () {
-      return fetch('/rtc/offer?id=' + id, { method: 'POST', body: pc.localDescription.sdp });
+      return fetch(SERVER + '/rtc/offer?id=' + id, { method: 'POST', body: pc.localDescription.sdp });
     }).then(function () {
       var tries = 0;
       (function poll() {
         if (rtc !== pc || camKey !== want) return;
-        fetch('/rtc/answer?id=' + id, { cache: 'no-store' }).then(function (r) { return r.status === 200 ? r.text() : null; }).then(function (sdp) {
+        fetch(SERVER + '/rtc/answer?id=' + id, { cache: 'no-store' }).then(function (r) { return r.status === 200 ? r.text() : null; }).then(function (sdp) {
           if (rtc !== pc) return;
           if (sdp) return pc.setRemoteDescription({ type: 'answer', sdp: sdp });
           if (++tries > 40) return retry(500); // nobody answered in ~30 s: ask again
@@ -406,7 +407,8 @@
   window.addEventListener('resize', function () { if (current) paint(current); });
 
   // Opened from the phone's address (Wi-Fi screen or the phone's own projector): follow the phone.
-  var remote = location.protocol === 'http:' && location.pathname === '/' && window.self === window.top;
+  // (This includes the phone app's own preview, which shows this page inside a frame.)
+  var remote = location.protocol === 'http:' && location.pathname === '/';
   if (remote) {
     var take = function (text) { try { render(JSON.parse(text)); } catch (e) {} };
     var lost = $('lost');

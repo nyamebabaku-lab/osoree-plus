@@ -5,3 +5,4 @@ dist-app
 bibles-import/
 tests/out/
 release/
+publish.sh
