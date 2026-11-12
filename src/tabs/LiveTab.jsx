@@ -5,7 +5,8 @@ import { IS_NATIVE, Screen } from '../lib/output.js';
 import { FONTS } from '../lib/fonts.js';
 import { slideKey } from '../lib/slides.js';
 import { Empty, Seg, Sheet } from '../ui.jsx';
-import { Row, Swatches } from './ScreenTab.jsx';
+import { MediaChoice, Row, Swatches } from './ScreenTab.jsx';
+import { GoLiveSection, ObsGuide } from './GoLive.jsx';
 
 const BARS = ['#0b1f3a', '#000000', '#12301f', '#3a0d12', '#2b1a45', '#ffffff'];
 const ACCENTS = ['#e2b232', '#ffffff', '#ef4444', '#22c55e', '#38bdf8'];
@@ -123,6 +124,28 @@ function CameraDeviceSection({ onCameraMode }) {
   );
 }
 
+function WatermarkSection() {
+  const { watermark: w, setWatermark } = useStore();
+  return (
+    <section className="card space-y-3 p-4">
+      <div className="label">Church logo watermark</div>
+      <p className="text-sm text-stone-500 dark:text-stone-400">A small logo in a corner of the live stream. Pick a picture from Media (a PNG with a see-through background looks best).</p>
+      <MediaChoice label="Watermark picture" value={w.id} onChange={(id) => setWatermark({ id })} none="No logo" imagesOnly />
+      {w.id && (
+        <>
+          <Row label="Corner"><Seg label="Watermark corner" value={w.corner} onChange={(corner) => setWatermark({ corner })} options={[['tl', '↖'], ['tr', '↗'], ['bl', '↙'], ['br', '↘']]} /></Row>
+          <Row label="Size"><Seg label="Watermark size" value={w.size} onChange={(size) => setWatermark({ size })} options={[[0.07, 'S'], [0.1, 'M'], [0.14, 'L']]} /></Row>
+          <div>
+            <div className="flex items-center justify-between text-sm font-semibold"><span>Strength</span><span className="text-stone-500">{Math.round(w.opacity * 100)}%</span></div>
+            <input type="range" min="0.3" max="1" step="0.05" value={w.opacity} onChange={(e) => setWatermark({ opacity: parseFloat(e.target.value) })} aria-label="Watermark strength" className="mt-2 w-full accent-gold-500" />
+          </div>
+          <Row label="Show on"><Seg label="Watermark shows on" value={w.where} onChange={(where) => setWatermark({ where })} options={[['stream', 'Stream only'], ['all', 'All screens']]} /></Row>
+        </>
+      )}
+    </section>
+  );
+}
+
 function OverlaySection() {
   const [urls, setUrls] = useState([]);
   const [server, setServer] = useState(false);
@@ -236,10 +259,13 @@ export default function LiveTab({ onCameraMode }) {
   return (
     <div className="space-y-4">
       <CameraSection />
+      <GoLiveSection />
       <PeopleSection />
       <TickerSection />
       <LookSection />
+      <WatermarkSection />
       <OverlaySection />
+      <ObsGuide />
       <CameraDeviceSection onCameraMode={onCameraMode} />
     </div>
   );

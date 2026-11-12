@@ -47,12 +47,18 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import com.osoree.plus.stream.RtmpPublisher;
+import com.osoree.plus.stream.StreamEngine;
+
 /**
  * Sends what the operator chooses to the outputs a phone can reach without internet:
  * a projector or TV on a cable or wireless display, and browsers on the same Wi-Fi or hotspot.
  * Also keeps the church's pictures and videos in the app's own storage.
  */
-@CapacitorPlugin(name = "Screen", permissions = { @Permission(strings = { android.Manifest.permission.CAMERA }, alias = "camera") })
+@CapacitorPlugin(name = "Screen", permissions = {
+    @Permission(strings = { android.Manifest.permission.CAMERA }, alias = "camera"),
+    @Permission(strings = { android.Manifest.permission.RECORD_AUDIO }, alias = "microphone")
+})
 public class ScreenPlugin extends Plugin implements DisplayManager.DisplayListener {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -120,6 +126,95 @@ public class ScreenPlugin extends Plugin implements DisplayManager.DisplayListen
         for (String t : said) list.put(t);
         r.put("results", list);
         call.resolve(r);
+    }
+
+    // ------------------------------------------------------------------ live streaming (YouTube, Facebook…)
+
+    private final StreamEngine stream = new StreamEngine();
+
+    @PluginMethod
+    public void requestMicrophone(PluginCall call) {
+        if (getPermissionState("microphone") == PermissionState.GRANTED) { JSObject r = new JSObject(); r.put("granted", true); call.resolve(r); return; }
+        requestPermissionForAlias("microphone", call, "microphoneAnswered");
+    }
+
+    @PermissionCallback
+    private void microphoneAnswered(PluginCall call) {
+        JSObject r = new JSObject();
+        r.put("granted", getPermissionState("microphone") == PermissionState.GRANTED);
+        call.resolve(r);
+    }
+
+    /** Sound inputs: the phone's microphone and anything plugged in (USB sound card from the mixer, cable). */
+    @PluginMethod
+    public void audioInputs(PluginCall call) {
+        android.media.AudioManager am = (android.media.AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+        JSArray list = new JSArray();
+        for (android.media.AudioDeviceInfo d : am.getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)) {
+            if (d.getType() == android.media.AudioDeviceInfo.TYPE_TELEPHONY || d.getType() == android.media.AudioDeviceInfo.TYPE_FM_TUNER) continue;
+            JSObject o = new JSObject();
+            o.put("id", d.getId());
+            o.put("name", StreamEngine.describe(d));
+            list.put(o);
+        }
+        JSObject r = new JSObject();
+        r.put("inputs", list);
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void streamStart(PluginCall call) {
+        if (server == null) { call.reject("Streaming needs the screen server, which could not start on this phone."); return; }
+        if (getPermissionState("microphone") != PermissionState.GRANTED) { call.reject("Allow the microphone first."); return; }
+        try {
+            java.util.List<StreamEngine.Target> targets = new java.util.ArrayList<>();
+            JSArray arr = call.getArray("targets");
+            for (int k = 0; arr != null && k < arr.length(); k++) {
+                org.json.JSONObject t = arr.getJSONObject(k);
+                targets.add(new StreamEngine.Target(t.optString("name", "Stream " + (k + 1)), t.optString("url", ""), t.optString("key", "")));
+            }
+            int w = call.getInt("width", 1280), h = call.getInt("height", 720);
+            String page = "http://127.0.0.1:" + server.port() + "/?stream";
+            stream.start(getActivity(), page, w, h, call.getInt("fps", 30), call.getInt("bitrate", 2_500_000), call.getInt("audioInput", -1), Boolean.TRUE.equals(call.getBoolean("stereo", true)), targets);
+            call.resolve(streamStatusObject());
+        } catch (Exception e) {
+            call.reject(e.getMessage() != null ? e.getMessage() : "The stream could not start.");
+        }
+    }
+
+    @PluginMethod
+    public void streamStop(PluginCall call) {
+        stream.stop();
+        call.resolve(streamStatusObject());
+    }
+
+    @PluginMethod
+    public void streamStatus(PluginCall call) { call.resolve(streamStatusObject()); }
+
+    private final java.util.Map<String, long[]> lastBytes = new java.util.HashMap<>();
+
+    private JSObject streamStatusObject() {
+        JSObject o = new JSObject();
+        o.put("running", stream.isRunning());
+        o.put("level", stream.level);
+        o.put("audioInput", stream.audioInputName);
+        JSArray list = new JSArray();
+        long now = System.currentTimeMillis();
+        for (RtmpPublisher p : stream.publishers()) {
+            JSObject t = new JSObject();
+            t.put("name", p.name);
+            t.put("state", p.state);
+            t.put("message", p.message);
+            t.put("uptime", p.uptimeMs());
+            t.put("dropped", p.droppedFrames);
+            long[] prev = lastBytes.get(p.name);
+            long kbps = prev != null && now > prev[1] ? (p.bytesSent - prev[0]) * 8 / Math.max(1, now - prev[1]) : 0;
+            lastBytes.put(p.name, new long[] { p.bytesSent, now });
+            t.put("kbps", kbps);
+            list.put(t);
+        }
+        o.put("targets", list);
+        return o;
     }
 
     /** Live video with the phone's own camera: ask once for camera permission. */
@@ -402,6 +497,7 @@ public class ScreenPlugin extends Plugin implements DisplayManager.DisplayListen
 
     @Override
     protected void handleOnDestroy() {
+        stream.stop();
         displays.unregisterDisplayListener(this);
         if (presentation != null) { try { presentation.dismiss(); } catch (Exception e) { /* already gone */ } presentation = null; }
         if (server != null) { server.stop(); server = null; }

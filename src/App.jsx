@@ -82,6 +82,7 @@ function LivePanel({ bible, versions }) {
           <span className={`rounded-md px-2 py-0.5 text-[11px] font-bold ${mode === 'show' && live ? 'bg-red-600 text-white' : 'bg-paper-200 text-stone-600 dark:bg-night-700 dark:text-stone-300'}`}>
             {mode === 'show' && live ? 'LIVE' : mode === 'black' ? 'BLACK' : 'IDLE'}
           </span>
+          {s.onAir && <span className="rounded-md bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white" title="Streaming live">ON AIR</span>}
           {s.cam.on && <span className="rounded-md bg-red-600/15 px-1.5 py-0.5 text-[10px] font-bold text-red-600 dark:text-red-400" title="Live video: text shows as a lower third">CAM</span>}
           <span className="min-w-0 flex-1 truncate text-sm font-bold">{title}</span>
           <button onClick={() => s.addPlan(planSlide)} disabled={!live || inPlan} aria-label="Add what is showing to the plan" className="icon-btn h-8 w-8 disabled:opacity-30"><ListPlus size={18} /></button>

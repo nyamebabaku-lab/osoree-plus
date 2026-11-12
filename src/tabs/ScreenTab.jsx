@@ -21,8 +21,8 @@ export const Row = ({ label, children }) => <div className="flex flex-wrap items
 const ALIGN = [['left', AlignLeft, 'Left'], ['center', AlignCenter, 'Centre'], ['right', AlignRight, 'Right'], ['justify', AlignJustify, 'Justify']];
 
 // Pick a picture or video from the Media library (or none).
-function MediaChoice({ value, onChange, label, none }) {
-  const media = useStore((s) => s.media).filter((m) => m.kind !== 'pdf');
+export function MediaChoice({ value, onChange, label, none, imagesOnly }) {
+  const media = useStore((s) => s.media).filter((m) => (imagesOnly ? m.kind === 'image' : m.kind !== 'pdf'));
   if (!media.length) return <p className="text-sm text-stone-500 dark:text-stone-400">Add pictures or videos in the Media tab first.</p>;
   return (
     <div className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label={label}>

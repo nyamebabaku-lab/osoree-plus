@@ -38,6 +38,12 @@
   #lt { position: fixed; left: 4vw; right: 4vw; bottom: 5vh; opacity: 0; transform: translateY(1.5vh); transition: opacity .25s, transform .25s; pointer-events: none; }
   #lt.on { opacity: 1; transform: none; }
   #lt.with-ticker { bottom: calc(5vh + 6.2vh); }
+  #lt.name { right: auto; left: 3vw; bottom: 3vh; max-width: 46vw; }
+  #lt.name.with-ticker { bottom: calc(6.2vh + 1.6vh); }
+  #lt.name #ltbox { padding: .4em .8em .45em; }
+  /* church logo watermark */
+  #wm { position: fixed; z-index: 5; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #wm img { display: block; width: 100%; height: auto; }
   #ltbox { position: relative; padding: .55em .9em .6em; border-radius: .35em; overflow: hidden; }
   #ltbg { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
   #ltbar { position: absolute; left: 0; top: 0; bottom: 0; width: .3em; }
@@ -62,6 +68,7 @@
 <div id="stage" class="layer"><div id="wrap"></div></div>
 <div id="lt"><div id="ltbox"><div id="ltbg"></div><div id="ltbar"></div><div id="lttext"></div></div></div>
 <div id="ticker"><div id="tickerbg"></div><div id="tickertext"></div></div>
+<div id="wm"><img alt=""></div>
 <div id="hint" class="note" hidden>Click for full screen</div>
 <div id="sound" class="note" hidden>Click to turn on the sound</div>
 <div id="lost" class="note" hidden>Reconnecting to the phone…</div>
@@ -73,6 +80,7 @@
   var PREVIEW = Q.has('preview');           // the small preview in the operator app: always silent
   var EMBEDDED = Q.has('screen');           // a projector driven by the phone app itself
   var OVERLAY = Q.has('overlay');           // transparent lower third for OBS / vMix
+  var STREAM = Q.has('stream');             // the picture sent to Facebook, YouTube… (drawn by the stream encoder)
   var NOCAM = Q.has('nocam');               // the phone's own preview: the camera belongs to the projector
   var SERVER = Q.get('server') || '';       // the phone app's preview: where to find the Wi-Fi camera
   if (OVERLAY) document.documentElement.className = 'overlay';
@@ -226,7 +234,7 @@
       // The phone app's own camera. Its preview takes the app's stream; its projector opens the camera itself
       // (both need no network). Screens on other devices receive it over Wi-Fi.
       if (PREVIEW) { usePhoneStream(key); return; }
-      if (!EMBEDDED) { startRemote(key); return; }
+      if (!EMBEDDED && !STREAM) { startRemote(key); return; }
     }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camNote.textContent = 'This screen cannot use a camera here. Open the screen from this device itself, not over Wi-Fi.'; return; }
     var video = cam.deviceId ? { deviceId: { exact: cam.deviceId } } : { facingMode: cam.facing || 'environment' };
@@ -243,6 +251,7 @@
   // ---- lower third + ticker ---------------------------------------------------------------
   var lt = $('lt'), ltText = $('lttext'), ticker = $('ticker'), tickerText = $('tickertext');
   var LT_CAP = { S: 0.045, M: 0.058, L: 0.075 }, LT_MAX = { S: 0.24, M: 0.32, L: 0.42 };
+  var NAME_CAP = { S: 0.032, M: 0.04, L: 0.05 };
   function hexA(hex, a) {
     var h = (hex || '#000').replace('#', ''); if (h.length === 3) h = h.replace(/./g, '$&$&');
     var n = parseInt(h, 16); return 'rgba(' + (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255) + ',' + (a == null ? 0.8 : a) + ')';
@@ -273,9 +282,9 @@
     ltText.style.fontFamily = L.font || 'system-ui, sans-serif';
     ltText.style.textAlign = L.align === 'center' ? 'center' : 'left';
     main.style.textTransform = st.upper ? 'uppercase' : 'none';
-    lt.className = 'on' + (s.ticker ? ' with-ticker' : '');
-    // Largest text that keeps the bar within its share of the screen.
-    var H = window.innerHeight, cap = H * (LT_CAP[L.size] || LT_CAP.M), max = H * (LT_MAX[L.size] || LT_MAX.M);
+    lt.className = 'on' + (s.ticker ? ' with-ticker' : '') + (c.big ? ' name' : '');
+    // Largest text that keeps the bar within its share of the screen. A name tag stays small.
+    var H = window.innerHeight, cap = H * (c.big ? (NAME_CAP[L.size] || NAME_CAP.M) : (LT_CAP[L.size] || LT_CAP.M)), max = H * (c.big ? 0.2 : (LT_MAX[L.size] || LT_MAX.M));
     var box = $('ltbox'), lo = 8, hi = cap;
     lt.style.fontSize = hi + 'px';
     if (box.offsetHeight > max) {
@@ -283,6 +292,20 @@
       lt.style.fontSize = lo + 'px';
     }
   }
+  var wm = $('wm'), wmImg = wm.querySelector('img'), wmSrc = '';
+  function showWatermark(s) {
+    var w = s.kind !== 'black' && s.watermark;
+    if (!w || !(w.all || OVERLAY || STREAM)) { wm.style.opacity = 0; return; }
+    if (w.src !== wmSrc) { wmSrc = w.src; wmImg.removeAttribute('src'); resolve(w.src, function (url) { if (wmSrc === w.src) wmImg.src = url; }); }
+    var size = (w.size || 0.12) * 100 + 'vw', gap = '3vmin';
+    wm.style.width = size;
+    wm.style.top = w.corner[0] === 't' ? gap : 'auto';
+    wm.style.bottom = w.corner[0] === 'b' ? (s.ticker ? 'calc(6.2vh + ' + gap + ')' : gap) : 'auto';
+    wm.style.left = w.corner[1] === 'l' ? gap : 'auto';
+    wm.style.right = w.corner[1] === 'r' ? gap : 'auto';
+    wm.style.opacity = w.opacity == null ? 0.85 : w.opacity;
+  }
+
   var tickerKey = '';
   function showTicker(s) {
     var t = s.kind !== 'black' && s.ticker;
@@ -373,6 +396,7 @@
     var hasText = s.kind === 'verse' || s.kind === 'song' || s.kind === 'strongs' || s.kind === 'name';
     var lower = OVERLAY || !!s.cam;   // live video and the streaming overlay put text in the lower third
     showTicker(s);
+    showWatermark(s);
     if (lower) {
       showCam(s.kind === 'black' ? null : s.cam);
       bg.style.background = s.kind === 'black' ? '#000' : (s.cam ? '#000' : (st.bg || '#000'));
@@ -433,19 +457,19 @@
       var es = new EventSource('/events');
       es.onmessage = function (e) { lost.hidden = true; take(e.data); };
       es.onopen = function () { lost.hidden = true; };
-      es.onerror = function () { lost.hidden = EMBEDDED || PREVIEW; };
+      es.onerror = function () { lost.hidden = EMBEDDED || PREVIEW || STREAM; };
     } else {
       setInterval(function () {
         var x = new XMLHttpRequest();
         x.open('GET', '/state?' + Date.now());
         x.onload = function () { lost.hidden = true; take(x.responseText); };
-        x.onerror = function () { lost.hidden = EMBEDDED || PREVIEW; };
+        x.onerror = function () { lost.hidden = EMBEDDED || PREVIEW || STREAM; };
         x.send();
       }, 700);
     }
   }
 
-  if (!PREVIEW && !EMBEDDED && !OVERLAY && window.self === window.top && location.protocol !== 'file:' && document.documentElement.requestFullscreen) {
+  if (!PREVIEW && !EMBEDDED && !OVERLAY && !STREAM && window.self === window.top && location.protocol !== 'file:' && document.documentElement.requestFullscreen) {
     var hint = $('hint');
     hint.hidden = false;
     setTimeout(function () { hint.hidden = true; }, 6000);

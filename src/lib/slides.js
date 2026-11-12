@@ -64,7 +64,7 @@ const mediaRef = (m) => m && m.kind !== 'pdf' && { src: m.src, kind: m.kind, fit
 
 // The message every screen draws (public/display.html).
 export function screenState(st, { bible, compare, songs, media }) {
-  const { live, mode, style, video, idleId, songLines, cam, lt, ticker, people = [] } = st;
+  const { live, mode, style, video, idleId, songLines, cam, lt, ticker, watermark, people = [] } = st;
   const look = {
     bg: style.bg, fg: style.fg, accent: style.accent, align: style.align, upper: style.upper, showRef: style.showRef,
     font: fontStack(style.font), size: style.size, blend: style.blend, shadow: style.shadow,
@@ -77,6 +77,7 @@ export function screenState(st, { bible, compare, songs, media }) {
     cam: cam?.on ? { source: cam.source, deviceId: cam.deviceId, facing: cam.facing, mirror: cam.mirror } : null,
     lt: lt && { ...lt, font: fontStack(lt.font) },
     ticker: ticker?.on && ticker.text.trim() ? { text: ticker.text.trim(), speed: ticker.speed } : null,
+    watermark: (() => { const m = watermark?.id && media.find((x) => x.id === watermark.id && x.kind === 'image'); return m ? { src: m.src, corner: watermark.corner, size: watermark.size, opacity: watermark.opacity, all: watermark.where === 'all' } : null; })(),
   };
   const msg = (m) => ({ ...m, ...extra });
   if (mode === 'black') return { kind: 'black', style: look };

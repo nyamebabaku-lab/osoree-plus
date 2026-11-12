@@ -36,6 +36,17 @@ export const useStore = create(persist((set, get) => ({
   lt: DEFAULT_LT,
   people: [], // names for the lower third: [{ id, name, title }]
   ticker: { on: false, text: '', speed: 1 },
+  watermark: { id: '', corner: 'tr', size: 0.1, opacity: 0.85, where: 'stream' }, // church logo in a corner
+  // Live streaming from the phone: up to 3 platforms at once.
+  streamCfg: {
+    targets: [
+      { id: 't1', platform: 'youtube', url: 'rtmps://a.rtmps.youtube.com/live2', key: '', on: true },
+      { id: 't2', platform: 'facebook', url: 'rtmps://live-api-s.facebook.com:443/rtmp/', key: '', on: false },
+      { id: 't3', platform: 'custom', url: '', key: '', on: false },
+    ],
+    quality: '720p', shape: 'landscape', audioInput: -1,
+  },
+  onAir: false, // a live stream is running (not saved)
   camAddress: '', // camera mode: the main phone's address
   camStatus: null, // this phone's camera while live video is on: { state, screens } or { error }
 
@@ -81,6 +92,10 @@ export const useStore = create(persist((set, get) => ({
   setCamAddress: (camAddress) => set({ camAddress }),
   setCamStatus: (camStatus) => set({ camStatus }),
   setTicker: (patch) => set({ ticker: { ...get().ticker, ...patch } }),
+  setWatermark: (patch) => set({ watermark: { ...get().watermark, ...patch } }),
+  setStreamCfg: (patch) => set({ streamCfg: { ...get().streamCfg, ...patch } }),
+  setStreamTarget: (id, patch) => set({ streamCfg: { ...get().streamCfg, targets: get().streamCfg.targets.map((t) => (t.id === id ? { ...t, ...patch } : t)) } }),
+  setOnAir: (onAir) => set({ onAir }),
   savePerson: (p) => {
     const people = get().people;
     set({ people: people.some((x) => x.id === p.id) ? people.map((x) => (x.id === p.id ? p : x)) : [...people, { ...p, id: p.id || newId() }] });
@@ -123,6 +138,7 @@ export const useStore = create(persist((set, get) => ({
       plan: get().plan.filter((p) => p.mediaId !== id),
       live: live?.mediaId === id ? null : live,
       idleId: idleId === id ? '' : idleId,
+      watermark: get().watermark.id === id ? { ...get().watermark, id: '' } : get().watermark,
       style: style.bgId === id ? { ...style, bgId: '' } : style,
     });
   },
@@ -149,7 +165,7 @@ export const useStore = create(persist((set, get) => ({
       style: { ...DEFAULT_STYLE, ...(old.style || {}) },
     };
   },
-  partialize: ({ video, camStatus, ...rest }) => rest, // eslint-disable-line no-unused-vars
+  partialize: ({ video, camStatus, onAir, ...rest }) => rest, // eslint-disable-line no-unused-vars
 }));
 
 // Is verse v of chapter c of book b part of what is showing?

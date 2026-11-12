@@ -193,15 +193,28 @@ await tab('Live');
 await page.getByRole('button', { name: 'Add', exact: true }).click(); await page.getByLabel('Name', { exact: true }).fill('Rev. Kwame Mensah'); await page.getByLabel('Title', { exact: true }).fill('Senior Pastor'); await page.getByRole('button', { name: 'Save' }).click();
 await page.getByRole('button', { name: /^Rev. Kwame Mensah Senior/ }).click(); s = await live(); ok('name live', s.kind === 'name' && s.name === 'Rev. Kwame Mensah' && s.title === 'Senior Pastor');
 await screen.waitForTimeout(500); ok('name in lower third', (await screen.locator('#lttext').innerText()).includes('Senior Pastor'));
+const tag = await screen.evaluate(() => { const r = document.getElementById('ltbox').getBoundingClientRect(); return { cls: document.getElementById('lt').className, left: r.left, width: r.width, bottom: innerHeight - r.bottom }; });
+ok('name tag is small at the bottom left', tag.cls.includes('name') && tag.left < 1280 * 0.05 && tag.width < 1280 * 0.5, JSON.stringify(tag));
 await page.getByLabel('Announcement text').fill('Welcome to all visitors · Bible study on Wednesday at 6pm');
 await page.getByRole('group', { name: 'Ticker' }).getByRole('button', { name: 'On' }).click(); await screen.waitForTimeout(400);
 ok('ticker runs', await screen.evaluate(() => document.getElementById('ticker').className === 'on' && document.getElementById('tickertext').textContent.startsWith('Welcome') && document.getElementById('lt').className.includes('with-ticker')));
 await page.getByLabel('Bar see-through').fill('0.5'); await screen.waitForTimeout(300);
 ok('bar see-through', (await screen.evaluate(() => document.getElementById('ltbg').style.background)).includes('0.5'));
 await shot(screen, 'live-name.png');
+// church logo watermark
+await page.getByRole('group', { name: 'Watermark picture' }).getByLabel('logo').click();
+await screen.waitForTimeout(400); ok('watermark only on the stream by default', await screen.evaluate(() => getComputedStyle(document.getElementById('wm')).opacity === '0'));
+await page.getByRole('group', { name: 'Watermark shows on' }).getByRole('button', { name: 'All screens' }).click();
+await page.getByRole('group', { name: 'Watermark corner' }).getByRole('button', { name: '↘' }).click();
+await screen.waitForFunction(() => getComputedStyle(document.getElementById('wm')).opacity !== '0' && document.querySelector('#wm img').naturalWidth > 0).then(() => ok('watermark on all screens when chosen', true), () => ok('watermark on all screens when chosen', false));
+const wmBox = await screen.evaluate(() => { const r = document.getElementById('wm').getBoundingClientRect(); return { right: innerWidth - r.right, bottom: innerHeight - r.bottom, w: r.width }; });
+ok('watermark in the chosen corner, above the ticker', wmBox.right < 40 && wmBox.bottom > 720 * 0.062 && wmBox.w > 50, JSON.stringify(wmBox));
+await shot(screen, 'live-watermark.png');
+await page.getByRole('group', { name: 'Watermark shows on' }).getByRole('button', { name: 'Stream only' }).click();
 // overlay for OBS
 const ov = await ctx.newPage(); watch(ov, 'overlay'); await ov.setViewportSize({ width: 1280, height: 720 }); await ov.goto(base + 'display.html?overlay'); await ov.waitForTimeout(800);
 const ovs = await ov.evaluate(() => ({ cls: document.documentElement.className, bg: getComputedStyle(document.body).backgroundColor, cam: getComputedStyle(document.getElementById('cam')).display, lt: document.getElementById('lt').className, hint: document.getElementById('hint').hidden, cursor: document.body.className }));
+ok('watermark on the streaming overlay', await ov.evaluate(() => getComputedStyle(document.getElementById('wm')).opacity !== '0'));
 ok('overlay is see-through with lower third only', ovs.cls === 'overlay' && ovs.bg === 'rgba(0, 0, 0, 0)' && ovs.cam === 'none' && ovs.lt.includes('on') && ovs.hint, JSON.stringify(ovs));
 await ov.screenshot({ path: out('overlay.png'), omitBackground: true }); await ov.close();
 // normal screen + black

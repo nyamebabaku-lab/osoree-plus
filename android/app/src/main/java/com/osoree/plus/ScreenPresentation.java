@@ -44,6 +44,7 @@ public class ScreenPresentation extends Presentation {
                     if (!PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(r)) { request.deny(); return; }
                 }
                 request.grant(new String[] { PermissionRequest.RESOURCE_VIDEO_CAPTURE });
+                // (the live stream's sound is captured natively, so pages never get the microphone)
             }
         });
         web.setWebViewClient(new WebViewClient() {
