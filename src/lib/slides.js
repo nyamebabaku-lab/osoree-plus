@@ -64,7 +64,7 @@ const mediaRef = (m) => m && m.kind !== 'pdf' && { src: m.src, kind: m.kind, fit
 
 // The message every screen draws (public/display.html).
 export function screenState(st, { bible, compare, songs, media }) {
-  const { live, mode, style, video, idleId, songLines, cam, lt, ticker, watermark, people = [], nameOn, nameTag } = st;
+  const { live, mode, style, video, view, idleId, songLines, cam, lt, ticker, watermark, people = [], nameOn, nameTag } = st;
   const look = {
     bg: style.bg, fg: style.fg, accent: style.accent, align: style.align, upper: style.upper, showRef: style.showRef,
     font: fontStack(style.font), size: style.size, blend: style.blend, shadow: style.shadow,
@@ -109,9 +109,9 @@ export function screenState(st, { bible, compare, songs, media }) {
   if (!m) return idle;
   if (live.type === 'pdf') {
     const src = m.pages[live.page || 0];
-    return src ? msg({ kind: 'media', media: { src, kind: 'image', fit: m.fit || 'contain' }, video, style: look }) : idle;
+    return src ? msg({ kind: 'media', media: { src, kind: 'image', fit: m.fit || 'contain' }, video, view, style: look }) : idle;
   }
-  return msg({ kind: 'media', media: mediaRef(m), video, style: look });
+  return msg({ kind: 'media', media: mediaRef(m), video, view, style: look });
 }
 
 export const bookName = (b) => NAMES[b];

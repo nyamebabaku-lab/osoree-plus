@@ -147,6 +147,38 @@ await page.getByText('clip', { exact: true }).click(); await page.getByRole('but
 await screen.waitForFunction(() => { const v = document.querySelector('#media video'); return v && v.currentTime > 0.2; }, null, { timeout: 8000 }).then(() => ok('video plays', true), () => ok('video plays', false));
 await page.getByRole('button', { name: 'Pause' }).click(); await screen.waitForTimeout(300); ok('pause', await screen.evaluate(() => document.querySelector('#media video').paused));
 
+// ---------- PowerPoint, Word, Excel, CSV ----------
+await page.setInputFiles('input[type=file][accept^="image"]', [fx('worship.pptx'), fx('notes.docx'), fx('accounts.xlsx'), fx('rota.csv')]);
+await page.waitForSelector('text=Added 4 files', { timeout: 90000 }).then(() => ok('PowerPoint, Word, Excel and CSV added', true), async () => ok('PowerPoint, Word, Excel and CSV added', false, await page.locator('main').innerText().then((t) => t.slice(0, 300))));
+const docs = await page.evaluate(() => JSON.parse(localStorage.getItem('osoree-plus')).state.media.filter((m) => m.format).map((m) => `${m.name}:${m.format}:${m.pages.length}`));
+ok('slides 3, Word 2 pages, Excel 3 pages (hidden sheet skipped), CSV 1', ['worship:pptx:3', 'notes:docx:2', 'accounts:xlsx:3', 'rota:csv:1'].every((x) => docs.includes(x)), docs.join(' '));
+await page.locator('button', { hasText: 'worship' }).last().click();
+await page.getByLabel('Page 1').click(); s = await live(); ok('PowerPoint slide live', s.kind === 'media' && s.media.kind === 'image');
+await screen.waitForFunction(() => document.querySelector('#media img')?.naturalWidth >= 1900).then(() => ok('slide is full HD', true), () => ok('slide is full HD', false));
+const px = await screen.evaluate(() => { const i = document.querySelector('#media img'); const c = document.createElement('canvas'); c.width = i.naturalWidth; c.height = i.naturalHeight; const g = c.getContext('2d'); g.drawImage(i, 0, 0); const d = g.getImageData(40, 40, 1, 1).data; return [d[0], d[1], d[2]]; });
+ok('slide background colour kept', Math.abs(px[0] - 0x0b) < 20 && Math.abs(px[1] - 0x1f) < 20 && Math.abs(px[2] - 0x3a) < 20, px.join(','));
+await shot(screen, 'pptx-slide.png');
+await page.getByLabel('Close').click();
+// adjustable view on a Word page
+await page.locator('button', { hasText: 'notes' }).last().click(); await page.getByLabel('Page 1').click(); await page.getByLabel('Close').click();
+const tf = () => screen.evaluate(() => document.querySelector('#media img')?.style.transform || '');
+await page.getByLabel('Zoom in').click(); await screen.waitForTimeout(300);
+ok('zoom in', (await tf()).includes('scale(1.25)'), await tf());
+await page.getByRole('button', { name: 'Fit width' }).click(); await screen.waitForTimeout(300); s = await live();
+const docImg = await screen.evaluate(() => { const i = document.querySelector('#media img'); return i.naturalWidth / i.naturalHeight; });
+ok('fit width fills the screen width from the top', Math.abs(s.view.zoom - (16 / 9) / docImg) < 0.05 && Math.abs(s.view.y - (s.view.zoom - 1) * 50) < 0.5, JSON.stringify(s.view));
+await shot(screen, 'docx-fit-width.png');
+await page.getByLabel('Next', { exact: true }).click(); s = await live();
+ok('next page keeps the zoom, from the top', s.media.src.endsWith('-p2') && s.view.zoom > 1.5 && Math.abs(s.view.y - (s.view.zoom - 1) * 50) < 0.5, JSON.stringify(s.view));
+const pv = page.getByLabel('Drag to move, pinch to zoom'); const bb = await pv.boundingBox();
+await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2); await page.mouse.down(); await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2 - 60, { steps: 5 }); await page.mouse.up(); s = await live();
+ok('drag on the preview moves the page', s.view.y < (s.view.zoom - 1) * 50 - 5, JSON.stringify(s.view));
+await page.getByRole('button', { name: 'Fit page' }).click(); s = await live(); ok('fit page', s.view.zoom === 1 && s.view.x === 0 && s.view.y === 0);
+await page.locator('button', { hasText: 'accounts' }).last().click(); await page.getByLabel('Page 1').click(); await page.getByLabel('Close').click();
+await shot(screen, 'xlsx-page.png');
+await page.setInputFiles('input[type=file][accept^="image"]', fx('old.ppt'));
+await page.waitForSelector('text=/older file type/').then(() => ok('old .ppt explained', true), () => ok('old .ppt explained', false));
+
 // ---------- background blend + idle ----------
 await page.getByText('logo', { exact: true }).click(); await page.getByRole('button', { name: 'Use as idle screen' }).click(); await page.getByRole('button', { name: 'Behind verses & songs' }).click(); await page.getByLabel('Close').click();
 await tab('Screen');

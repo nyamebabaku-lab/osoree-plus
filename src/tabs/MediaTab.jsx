@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { FileText, Film, ImagePlus, Layers, ListPlus, MonitorPlay, Moon, Play, Trash2 } from 'lucide-react';
 import { useStore } from '../store.js';
-import { addMediaFiles, formatSize, pickNativeMedia, removeMediaFile, useMediaUrl } from '../lib/media.js';
+import { addMediaFiles, formatName, formatSize, pickNativeMedia, removeMediaFile, useMediaUrl } from '../lib/media.js';
 import { IS_NATIVE } from '../lib/output.js';
 import { slideKey } from '../lib/slides.js';
 import { Empty, Seg, Sheet } from '../ui.jsx';
@@ -15,7 +15,7 @@ export function Thumb({ item, className = '' }) {
         ? <video src={url + '#t=0.5'} muted playsInline preload="metadata" className="h-full w-full object-cover" />
         : <img src={url} alt="" className={`h-full w-full ${item.kind === 'pdf' ? 'bg-white object-contain' : 'object-cover'}`} />)}
       {item.kind === 'video' && <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-bold text-white"><Film size={10} className="mr-0.5 inline" />VIDEO</span>}
-      {item.kind === 'pdf' && <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-bold text-white"><FileText size={10} className="mr-0.5 inline" />PDF · {item.pages.length}</span>}
+      {item.kind === 'pdf' && <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-bold text-white"><FileText size={10} className="mr-0.5 inline" />{formatName(item).toUpperCase()} · {item.pages.length}</span>}
     </div>
   );
 }
@@ -36,7 +36,7 @@ function PdfSheet({ item, onClose }) {
   return (
     <Sheet title={item.name} onClose={onClose}>
       <div className="space-y-3">
-        <p className="text-sm text-stone-500 dark:text-stone-400">Tap a page to show it. Use Next and Back to turn pages.{item.more ? ` Only the first ${item.pages.length} of ${item.more} pages were added.` : ''}</p>
+        <p className="text-sm text-stone-500 dark:text-stone-400">{formatName(item)} · tap a {item.format === 'pptx' ? 'slide' : 'page'} to show it. Use Next and Back to turn pages, and zoom or move it from the live panel.{item.format && item.format !== 'pdf' ? ' (For an exact copy of a complex file, save it as PDF and add that.)' : ''}{item.more ? ` Only the first ${item.pages.length} of ${item.more} pages were added.` : ''}</p>
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
           {item.pages.map((src, i) => (
             <PageTile key={src} src={src} n={i + 1} live={mode === 'show' && live?.type === 'pdf' && live.mediaId === item.id && (live.page || 0) === i} onClick={() => goLive({ type: 'pdf', mediaId: item.id, page: i })} />
@@ -91,30 +91,34 @@ export default function MediaTab() {
   const [msg, setMsg] = useState(null);
   const file = useRef(null);
 
-  const added = (items) => {
+  const added = (items, problems = []) => {
     addMedia(items);
-    setMsg(items.length ? { text: `Added ${items.length} ${items.length === 1 ? 'file' : 'files'}.` } : { text: 'Choose pictures (JPG, PNG), MP4 videos or PDFs.', bad: true });
+    const ok = items.length ? `Added ${items.length} ${items.length === 1 ? 'file' : 'files'}.` : '';
+    if (problems.length) setMsg({ text: [ok, ...problems].filter(Boolean).join(' '), bad: true });
+    else setMsg(items.length ? { text: ok } : { text: 'Choose pictures, MP4 videos, PDFs or PowerPoint, Word and Excel files.', bad: true });
   };
   const pick = () => {
     if (!IS_NATIVE) { file.current.click(); return; }
     setMsg({ text: 'Copying… PDFs take a moment while each page is prepared.' });
-    pickNativeMedia().then(added).catch((e) => setMsg(/cancel/i.test(e.message) ? null : { text: e.message || 'Those files could not be added.', bad: true }));
+    const problems = [];
+    pickNativeMedia((text) => setMsg({ text: `Preparing ${text}…` }), problems).then((items) => added(items, problems)).catch((e) => setMsg(/cancel/i.test(e.message) ? null : { text: e.message || 'Those files could not be added.', bad: true }));
   };
   const onFiles = async (e) => {
     const files = [...e.target.files];
     e.target.value = '';
     if (!files.length) return;
     setMsg({ text: 'Saving…' });
-    try { added(await addMediaFiles(files, (text) => setMsg({ text: `Preparing ${text}…` }))); } catch (err) { setMsg({ text: /password/i.test(err?.message) ? 'That PDF is password-protected.' : err?.name === 'InvalidPDFException' ? 'That PDF could not be read.' : 'There is not enough space to keep those files.', bad: true }); }
+    const problems = [];
+    try { added(await addMediaFiles(files, (text) => setMsg({ text: `Preparing ${text}…` }), problems), problems); } catch (err) { setMsg({ text: /password/i.test(err?.message) ? 'That PDF is password-protected.' : err?.name === 'InvalidPDFException' ? 'That PDF could not be read.' : err?.message && !/quota/i.test(err.message) ? err.message : 'There is not enough space to keep those files.', bad: true }); }
   };
 
   const open = media.find((m) => m.id === openId);
   return (
     <div className="space-y-3">
-      <button onClick={pick} className="btn-gold w-full"><ImagePlus size={18} /> Add pictures, videos or PDFs</button>
-      <input ref={file} type="file" accept="image/*,video/mp4,video/webm,.mp4,.m4v,application/pdf,.pdf" multiple hidden onChange={onFiles} />
+      <button onClick={pick} className="btn-gold w-full"><ImagePlus size={18} /> Add pictures, videos or documents</button>
+      <input ref={file} type="file" accept="image/*,video/mp4,video/webm,.mp4,.m4v,application/pdf,.pdf,.pptx,.docx,.xlsx,.csv,.txt,.ppt,.doc,.xls" multiple hidden onChange={onFiles} />
       {msg && <p className={`px-1 text-sm ${msg.bad ? 'text-red-600 dark:text-red-400' : 'text-stone-600 dark:text-stone-300'}`}>{msg.text}</p>}
-      {!media.length ? <Empty>Add your church logo, announcement pictures, MP4 videos or PDF slides and notes. They stay on this device and work without internet.</Empty> : (
+      {!media.length ? <Empty>Add your church logo, announcement pictures, MP4 videos, PDFs, PowerPoint, Word and Excel files. They stay on this device and work without internet.</Empty> : (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {media.map((m) => {
             const on = mode === 'show' && (live?.type === 'media' || live?.type === 'pdf') && live.mediaId === m.id;

@@ -31,6 +31,7 @@ export const useStore = create(persist((set, get) => ({
   live: null, // the slide on screen (see lib/slides.js)
   mode: 'clear', // show | clear | black
   video: { playing: true, seq: 0, loop: false, muted: false },
+  view: { zoom: 1, x: 0, y: 0 }, // zoom and position of a picture, PDF or document page on screen (x, y in % of the screen)
   // Live video: a camera fills the screen and text moves to a lower third.
   cam: { on: false, source: 'device', deviceId: '', facing: 'environment', mirror: false },
   lt: DEFAULT_LT,
@@ -71,8 +72,13 @@ export const useStore = create(persist((set, get) => ({
       next = { type: 'verse', refs };
     }
     const newMedia = next.type === 'media' && (live?.type !== 'media' || live.mediaId !== next.mediaId);
+    // A new picture or document starts whole; the next page of the same document keeps the zoom, from the top.
+    const sameDoc = next.type === 'pdf' && live?.type === 'pdf' && live.mediaId === next.mediaId;
+    const { view } = get();
+    const nextView = sameDoc ? { zoom: view.zoom, x: view.x, y: Math.max(0, (view.zoom - 1) * 50) } : ['media', 'pdf'].includes(next.type) ? { zoom: 1, x: 0, y: 0 } : view;
     set({
       live: next,
+      view: nextView,
       mode: 'show',
       video: newMedia ? { ...video, playing: true, seq: video.seq + 1 } : video,
       history: next.type === 'verse' ? [next, ...history.filter((h) => slideKey(h) !== slideKey(next))].slice(0, 30) : history,
@@ -111,6 +117,13 @@ export const useStore = create(persist((set, get) => ({
     set({ people: get().people.filter((x) => x.id !== id), plan: get().plan.filter((x) => x.personId !== id), live: live?.personId === id ? null : live, nameOn: get().nameOn === id ? '' : get().nameOn });
   },
   setVideo: (patch) => set({ video: { ...get().video, ...patch } }),
+  // Keeps the picture from being pushed off screen: at zoom z it may move at most (z - 1) / 2 of the screen each way.
+  setView: (patch) => {
+    const v = { ...get().view, ...patch };
+    const zoom = Math.min(8, Math.max(1, Math.round(v.zoom * 100) / 100));
+    const lim = (zoom - 1) * 50;
+    set({ view: { zoom, x: Math.max(-lim, Math.min(lim, v.x)), y: Math.max(-lim, Math.min(lim, v.y)) } });
+  },
   restartVideo: () => set({ video: { ...get().video, playing: true, seq: get().video.seq + 1 } }),
 
   addPlan: (slide) => { if (!get().plan.some((x) => slideKey(x) === slideKey(slide))) set({ plan: [...get().plan, { ...slide, id: newId() }] }); },
@@ -173,7 +186,7 @@ export const useStore = create(persist((set, get) => ({
       style: { ...DEFAULT_STYLE, ...(old.style || {}) },
     };
   },
-  partialize: ({ video, camStatus, onAir, nameOn, ...rest }) => rest, // eslint-disable-line no-unused-vars
+  partialize: ({ video, camStatus, onAir, nameOn, view, ...rest }) => rest, // eslint-disable-line no-unused-vars
 }));
 
 // Is verse v of chapter c of book b part of what is showing?

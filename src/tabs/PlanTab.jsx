@@ -14,7 +14,7 @@ function detail(item, { bible, songs, media, people = [] }) {
   if (item.type === 'name') return people.find((p) => p.id === item.personId)?.title || 'Name';
   const m = media.find((x) => x.id === item.mediaId);
   if (!m) return '';
-  return m.kind === 'pdf' ? `PDF · ${m.pages.length} pages` : m.kind === 'video' ? 'Video' : 'Picture';
+  return m.kind === 'pdf' ? `${m.format && m.format !== 'pdf' ? { pptx: 'PowerPoint', docx: 'Word', xlsx: 'Excel', csv: 'Spreadsheet', txt: 'Text' }[m.format] : 'PDF'} · ${m.pages.length} pages` : m.kind === 'video' ? 'Video' : 'Picture';
 }
 
 function Row({ item, ctx, live, onShow, children }) {

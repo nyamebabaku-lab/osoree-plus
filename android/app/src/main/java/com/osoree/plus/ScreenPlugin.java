@@ -269,7 +269,10 @@ public class ScreenPlugin extends Plugin implements DisplayManager.DisplayListen
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);
         i.setType("*/*");
-        i.putExtra(Intent.EXTRA_MIME_TYPES, new String[] { "image/*", "video/*", "application/pdf" });
+        i.putExtra(Intent.EXTRA_MIME_TYPES, new String[] { "image/*", "video/*", "application/pdf",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-powerpoint", "application/msword", "application/vnd.ms-excel",
+            "text/csv", "text/comma-separated-values", "text/plain" });
         i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         startActivityForResult(call, i, "mediaPicked");
     }
@@ -295,6 +298,24 @@ public class ScreenPlugin extends Plugin implements DisplayManager.DisplayListen
                     if ("application/pdf".equals(type) || name.toLowerCase().endsWith(".pdf")) {
                         JSObject pdf = importPdf(cr, uri, name);
                         if (pdf != null) items.put(pdf);
+                        continue;
+                    }
+                    String lower = name.toLowerCase();
+                    if (lower.matches(".*\\.(pptx|docx|xlsx|csv|txt|ppt|doc|xls|pps|odp|odt|ods|rtf)$")) {
+                        // Office files are converted to pages by the app itself: hand over a private copy.
+                        String id = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+                        File out = new File(mediaDir, id + lower.substring(lower.lastIndexOf('.')));
+                        long size = 0;
+                        try (InputStream in = cr.openInputStream(uri); OutputStream os = new FileOutputStream(out)) {
+                            if (in == null) continue;
+                            byte[] buf = new byte[64 * 1024];
+                            int n;
+                            while ((n = in.read(buf)) > 0) { os.write(buf, 0, n); size += n; }
+                        }
+                        JSObject o = new JSObject();
+                        o.put("id", id); o.put("name", name); o.put("type", type == null ? "" : type);
+                        o.put("path", out.getAbsolutePath()); o.put("size", size); o.put("office", true);
+                        items.put(o);
                         continue;
                     }
                     if (type == null || !(type.startsWith("image/") || type.startsWith("video/"))) continue;
@@ -374,6 +395,27 @@ public class ScreenPlugin extends Plugin implements DisplayManager.DisplayListen
         File[] kids = f.listFiles();
         if (kids != null) for (File k : kids) deleteRecursive(k);
         f.delete();
+    }
+
+    /** One converted page (JPEG, base64) of a PowerPoint/Word/Excel file: saved as files/media/<id>/p<n>.jpg. */
+    @PluginMethod
+    public void saveMediaPage(PluginCall call) {
+        final String id = call.getString("id", ""), data = call.getString("data", "");
+        final int n = call.getInt("n", 1);
+        if (!id.matches("[A-Za-z0-9]+") || data.isEmpty()) { call.reject("Bad page."); return; }
+        io.execute(() -> {
+            try {
+                File dir = new File(mediaDir, id);
+                dir.mkdirs();
+                File out = new File(dir, "p" + n + ".jpg");
+                try (OutputStream os = new FileOutputStream(out)) { os.write(android.util.Base64.decode(data, android.util.Base64.DEFAULT)); }
+                JSObject r = new JSObject();
+                r.put("path", out.getAbsolutePath());
+                call.resolve(r);
+            } catch (Exception e) {
+                call.reject("The page could not be saved (is the phone full?).", e);
+            }
+        });
     }
 
     @PluginMethod

@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   BookOpen, ChevronLeft, ChevronRight, EyeOff, Image, ListOrdered, ListPlus, Minus, Monitor, Moon, Music, Pause, Play,
-  Plus, Radio, Repeat, RotateCcw, Square, Sun, Volume2, VolumeX, X,
+  Plus, Radio, Repeat, RotateCcw, Square, Sun, Volume2, VolumeX, X, ZoomIn, ZoomOut,
 } from 'lucide-react';
 import { useStore, MAX_SPAN } from './store.js';
 import { BUILTIN, blockSize, loadBible } from './lib/bible.js';
 import { refLabel, setExtraBookNames } from './lib/books.js';
 import { IS_NATIVE, Screen, send } from './lib/output.js';
+import { useMediaUrl } from './lib/media.js';
 import { screenState, slideKey, slideTitle, stepSlide, MAX_REFS } from './lib/slides.js';
 import BibleTab from './tabs/BibleTab.jsx';
 import SongsTab from './tabs/SongsTab.jsx';
@@ -56,6 +57,75 @@ function usePreviewUrl() {
   return url;
 }
 
+// Zoom and move pictures and document pages: buttons, plus drag (one finger) and pinch (two) on the preview.
+function useNaturalSize(src) {
+  const url = useMediaUrl(src);
+  const [size, setSize] = useState(null);
+  useEffect(() => {
+    if (!url) { setSize(null); return; }
+    const img = new window.Image(); // (Image here is the Media tab icon)
+    img.onload = () => setSize({ w: img.naturalWidth, h: img.naturalHeight });
+    img.src = url;
+  }, [url]);
+  return size;
+}
+
+function ViewControls({ src }) {
+  const view = useStore((s) => s.view);
+  const setView = useStore((s) => s.setView);
+  const size = useNaturalSize(src);
+  // Fit width: a tall page fills the screen's width and starts at the top (the screen is 16:9).
+  const fitWidth = () => {
+    if (!size) return;
+    const zoom = Math.max(1, (16 / 9) / (size.w / size.h));
+    setView({ zoom, x: 0, y: (zoom - 1) * 50 });
+  };
+  const step = (f) => setView({ zoom: view.zoom * f, x: view.x * f, y: view.y * f });
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <button onClick={() => step(1 / 1.25)} disabled={view.zoom <= 1} aria-label="Zoom out" className="btn-soft min-h-9 px-2.5"><ZoomOut size={16} /></button>
+      <span className="w-12 text-center text-sm font-bold tabular-nums" aria-label="Zoom">{Math.round(view.zoom * 100)}%</span>
+      <button onClick={() => step(1.25)} disabled={view.zoom >= 8} aria-label="Zoom in" className="btn-soft min-h-9 px-2.5"><ZoomIn size={16} /></button>
+      <button onClick={() => setView({ zoom: 1, x: 0, y: 0 })} className="btn-soft min-h-9 px-2.5 text-xs">Fit page</button>
+      <button onClick={fitWidth} disabled={!size} className="btn-soft min-h-9 px-2.5 text-xs">Fit width</button>
+      <span className="ml-auto text-[11px] text-stone-500 dark:text-stone-400">Drag or pinch the preview</span>
+    </div>
+  );
+}
+
+function PreviewGestures() {
+  const setView = useStore((s) => s.setView);
+  const pts = useRef(new Map());
+  const start = useRef(null);
+  const onDown = (e) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    pts.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const v = useStore.getState().view;
+    const [a, b] = [...pts.current.values()];
+    start.current = { view: v, a: { ...a }, dist: b ? Math.hypot(a.x - b.x, a.y - b.y) : 0 };
+  };
+  const onMove = (e) => {
+    if (!pts.current.has(e.pointerId) || !start.current) return;
+    pts.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const r = e.currentTarget.getBoundingClientRect();
+    const [a, b] = [...pts.current.values()];
+    const s0 = start.current;
+    if (b && s0.dist) {
+      const f = Math.hypot(a.x - b.x, a.y - b.y) / s0.dist;
+      setView({ zoom: s0.view.zoom * f, x: s0.view.x * f, y: s0.view.y * f });
+    } else {
+      setView({ x: s0.view.x + ((a.x - s0.a.x) / r.width) * 100, y: s0.view.y + ((a.y - s0.a.y) / r.height) * 100 });
+    }
+  };
+  const onUp = (e) => {
+    pts.current.delete(e.pointerId);
+    const rest = [...pts.current.values()];
+    start.current = rest.length ? { view: useStore.getState().view, a: { ...rest[0] }, dist: 0 } : null;
+  };
+  const onWheel = (e) => { const v = useStore.getState().view; const f = e.deltaY < 0 ? 1.1 : 1 / 1.1; setView({ zoom: v.zoom * f, x: v.x * f, y: v.y * f }); };
+  return <div onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onWheel={onWheel} aria-label="Drag to move, pinch to zoom" className="absolute inset-0 cursor-grab touch-none" />;
+}
+
 // What is on screen right now, with the controls the operator needs most.
 function LivePanel({ bible, versions }) {
   const s = useStore();
@@ -68,6 +138,9 @@ function LivePanel({ bible, versions }) {
   const canPrev = !!live && !!stepSlide(live, -1, ctx);
   const isVerse = live?.type === 'verse';
   const liveMedia = live?.type === 'media' ? media.find((m) => m.id === live.mediaId) : null;
+  const liveDoc = live?.type === 'pdf' ? media.find((m) => m.id === live.mediaId) : null;
+  const zoomSrc = mode === 'show' ? (liveDoc ? liveDoc.pages[live.page || 0] : liveMedia?.kind === 'image' ? liveMedia.src : null) : null;
+  const zoomable = !!zoomSrc;
   const title = live ? slideTitle(live, ctx) + (isVerse ? ` · ${bible.abbr}` : '') : 'Nothing shown yet';
   const planSlide = live && (live.type === 'song' ? { ...live, idx: 0 } : live.type === 'pdf' ? { ...live, page: 0 } : live);
   const inPlan = planSlide && s.plan.some((p) => slideKey(p) === slideKey(planSlide));
@@ -76,6 +149,7 @@ function LivePanel({ bible, versions }) {
     <div className="card overflow-hidden">
       <div className="relative aspect-video bg-black">
         {previewUrl && <iframe src={previewUrl} title="Screen preview" tabIndex={-1} allow="camera; autoplay" className="pointer-events-none absolute inset-0 h-full w-full border-0" />}
+        {zoomable && <PreviewGestures />}
       </div>
       <div className="space-y-2 p-3">
         <div className="flex items-center gap-2">
@@ -113,6 +187,7 @@ function LivePanel({ bible, versions }) {
           <button onClick={() => toggle('black')} className={`${mode === 'black' ? 'btn-on' : 'btn-soft'} px-0`}><Square size={16} /> Black</button>
         </div>
 
+        {zoomable && <ViewControls src={zoomSrc} />}
         {liveMedia?.kind === 'video' ? (
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={() => s.setVideo({ playing: !video.playing })} className="btn-gold min-h-9 px-3">{video.playing ? <><Pause size={16} /> Pause</> : <><Play size={16} /> Play</>}</button>
@@ -180,6 +255,11 @@ function useKeys(bible) {
       const ctx = { bible, songs: s.songs, media: s.media, songLines: s.songLines, span: s.span };
       const dir = { ArrowRight: 1, PageDown: 1, ' ': 1, ArrowLeft: -1, PageUp: -1 }[e.key];
       if (dir) { const n = stepSlide(s.live, dir, ctx); if (n) { e.preventDefault(); s.goLive(n); } return; }
+      if (e.key === '+' || e.key === '=' || e.key === '-' || e.key === '0') {
+        const v = s.view, f = e.key === '-' ? 1 / 1.25 : 1.25;
+        if (e.key === '0') s.setView({ zoom: 1, x: 0, y: 0 }); else s.setView({ zoom: v.zoom * f, x: v.x * f, y: v.y * f });
+        return;
+      }
       const k = e.key.toLowerCase();
       if (k === 'c' || k === 'b') { const m = k === 'c' ? 'clear' : 'black'; s.setMode(s.mode === m ? (s.live ? 'show' : 'clear') : m); }
     };

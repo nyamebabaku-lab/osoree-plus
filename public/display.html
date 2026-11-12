@@ -11,7 +11,7 @@
   .layer { position: fixed; top: 0; right: 0; bottom: 0; left: 0; }
   #bg { transition: background .3s; }
   #media { opacity: 0; transition: opacity .35s; }
-  #media img, #media video { position: absolute; width: 100%; height: 100%; object-fit: contain; }
+  #media img, #media video { position: absolute; width: 100%; height: 100%; object-fit: contain; transform-origin: 50% 50%; transition: transform .18s ease-out; }
   #dim { background: #000; opacity: 0; transition: opacity .35s, background .3s; }
   #stage { display: flex; flex-direction: column; justify-content: center; padding: 6vmin 7vmin; box-sizing: border-box; }
   #wrap { opacity: 0; transition: opacity .2s; }
@@ -94,7 +94,7 @@
   var $ = function (id) { return document.getElementById(id); };
   var bg = $('bg'), mediaBox = $('media'), dim = $('dim'), stage = $('stage'), wrap = $('wrap');
   var current = null, textKey = '', timer = null;
-  var mediaKey = '', mediaEl = null, videoSeq = null, needsSound = false;
+  var mediaKey = '', mediaEl = null, videoSeq = null, needsSound = false, s_view = null;
   if (!PREVIEW && !Q.has('overlay')) document.body.className = 'screen';
 
   // ---- pictures and videos ----------------------------------------------------------------
@@ -133,6 +133,9 @@
     }
     if (!mediaEl) return;
     mediaEl.style.objectFit = role === 'bg' ? 'cover' : (m.fit || 'contain');
+    // The operator's zoom and position (pictures, PDFs, documents, videos).
+    var v = role === 'media' && s_view;
+    mediaEl.style.transform = v && (v.zoom !== 1 || v.x || v.y) ? 'translate(' + (v.x || 0) + '%,' + (v.y || 0) + '%) scale(' + (v.zoom || 1) + ')' : '';
     if (mediaEl.play && mediaEl.src) controlVideo(mediaEl, role, video);
   }
 
@@ -434,7 +437,7 @@
     if (lower) {
       showCam(s.kind === 'black' ? null : s.cam);
       bg.style.background = s.kind === 'black' ? '#000' : (s.cam ? '#000' : (st.bg || '#000'));
-      if (s.kind === 'media') showMedia(s.media, 'media', s.video); else showMedia(null);
+      if (s.kind === 'media') { s_view = s.view; showMedia(s.media, 'media', s.video); } else showMedia(null);
       dim.style.opacity = 0;
       wrap.style.opacity = 0;
       if (hasText) showLower(s); else lt.className = '';
@@ -447,7 +450,7 @@
     stage.style.paddingBottom = s.ticker ? 'calc(6vmin + 6.2vh)' : '';
     bg.style.background = s.kind === 'black' ? '#000' : (st.bg || '#000');
     if (s.kind === 'black') showMedia(null);
-    else if (s.kind === 'media') showMedia(s.media, 'media', s.video);
+    else if (s.kind === 'media') { s_view = s.view; showMedia(s.media, 'media', s.video); }
     else if (s.kind === 'idle') showMedia(s.idle, 'idle');
     else showMedia(st.bgMedia, 'bg');
     // The picture behind text fades into the chosen background colour so the words stay clear.
