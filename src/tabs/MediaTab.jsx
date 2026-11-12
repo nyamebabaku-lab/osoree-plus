@@ -5,6 +5,8 @@ import { addMediaFiles, formatName, formatSize, pickNativeMedia, removeMediaFile
 import { IS_NATIVE } from '../lib/output.js';
 import { slideKey } from '../lib/slides.js';
 import { Empty, Seg, Sheet } from '../ui.jsx';
+import { ProLock } from '../Pro.jsx';
+import { OFFICE_EXT, OLD_OFFICE_EXT } from '../lib/office.js';
 
 export function Thumb({ item, className = '' }) {
   const url = useMediaUrl(item?.src);
@@ -105,11 +107,19 @@ export default function MediaTab() {
     if (!IS_NATIVE) { file.current.click(); return; }
     setMsg({ text: 'Copying… PDFs take a moment while each page is prepared.' });
     const problems = [];
-    pickNativeMedia((text) => setMsg({ text: `Preparing ${text}…` }), problems).then((items) => added(items, problems)).catch((e) => setMsg(/cancel/i.test(e.message) ? null : { text: e.message || 'Those files could not be added.', bad: true }));
+    pickNativeMedia((text) => setMsg({ text: `Preparing ${text}…` }), problems).then((items) => {
+      if (items.some((x) => x.kind === 'pdf') && !useStore.getState().allowed('docs')) {
+        items.filter((x) => x.kind === 'pdf').forEach((x) => removeMediaFile(x));
+        items = items.filter((x) => x.kind !== 'pdf');
+      }
+      added(items, problems);
+    }).catch((e) => setMsg(/cancel/i.test(e.message) ? null : { text: e.message || 'Those files could not be added.', bad: true }));
   };
   const onFiles = async (e) => {
-    const files = [...e.target.files];
+    let files = [...e.target.files];
     e.target.value = '';
+    const isDoc = (f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf' || OFFICE_EXT.test(f.name) || OLD_OFFICE_EXT.test(f.name);
+    if (files.some(isDoc) && !useStore.getState().allowed('docs')) files = files.filter((f) => !isDoc(f));
     if (!files.length) return;
     setMsg({ text: 'Saving…' });
     const problems = [];
@@ -127,10 +137,11 @@ export default function MediaTab() {
           {media.map((m) => {
             const on = mode === 'show' && (live?.type === 'media' || live?.type === 'pdf') && live.mediaId === m.id;
             return (
-              <button key={m.id} onClick={() => setOpenId(m.id)} className={`overflow-hidden rounded-xl text-left ${on ? 'ring-2 ring-red-600' : 'card'}`}>
+              <button key={m.id} onClick={() => (m.kind !== 'pdf' || useStore.getState().allowed('docs')) && setOpenId(m.id)} className={`overflow-hidden rounded-xl text-left ${on ? 'ring-2 ring-red-600' : 'card'}`}>
                 <Thumb item={m} className="aspect-video" />
                 <div className="flex items-center gap-1 px-2 py-1.5">
                   <span className="min-w-0 flex-1 truncate text-xs font-semibold">{m.name}</span>
+                  {m.kind === 'pdf' && <ProLock feature="docs" />}
                   {on && <MonitorPlay size={14} className="shrink-0 text-red-600" />}
                   {idleId === m.id && <Moon size={14} className="shrink-0 text-gold-500" aria-label="Idle screen" />}
                   {style.bgId === m.id && <Layers size={14} className="shrink-0 text-gold-500" aria-label="Text background" />}

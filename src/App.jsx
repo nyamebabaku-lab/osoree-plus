@@ -17,6 +17,7 @@ import ScreenTab from './tabs/ScreenTab.jsx';
 import LiveTab from './tabs/LiveTab.jsx';
 import CameraMode from './CameraMode.jsx';
 import { PipBar } from './tabs/PipControls.jsx';
+import { Paywall, ProBadge, lockedFeatures, useLicenceBoot } from './Pro.jsx';
 import { startWifiCamera } from './lib/wificam.js';
 
 const TABS = [['bible', 'Bible', BookOpen], ['songs', 'Songs', Music], ['media', 'Media', Image], ['live', 'Live', Radio], ['plan', 'Plan', ListOrdered], ['screen', 'Screen', Monitor]];
@@ -280,11 +281,12 @@ export default function App() {
   const [cameraMode, setCameraMode] = useState(false);
   useDark(themeMode);
   useKeys(bible);
+  useLicenceBoot();
   usePhoneCamera();
   useEffect(() => { setExtraBookNames(bible?.bookNames); }, [bible]);
 
   // Keep every screen in step with the operator.
-  const message = bible ? screenState(state, { bible, compare: compareId ? compare : null, songs, media }) : null;
+  const message = bible ? screenState({ ...state, locked: lockedFeatures(state.licStatus) }, { bible, compare: compareId ? compare : null, songs, media }) : null;
   const json = message ? JSON.stringify(message) : '';
   useEffect(() => { if (json) send(JSON.parse(json)); }, [json]);
 
@@ -296,7 +298,7 @@ export default function App() {
   return (
     <div className="mx-auto flex h-full max-w-6xl flex-col">
       <header className="flex items-center gap-2 px-4 pb-2 pt-[max(.75rem,env(safe-area-inset-top))]">
-        <h1 className="mr-auto text-lg font-bold tracking-tight">Ɔsɔreɛ <span className="text-gold-500">Plus</span></h1>
+        <h1 className="mr-auto flex items-center text-lg font-bold tracking-tight"><span>Ɔsɔreɛ <span className="text-gold-500">Plus</span></span><ProBadge /></h1>
         <select value={versionId} onChange={(e) => setVersion(e.target.value)} aria-label="Bible version" className="min-h-10 max-w-[11rem] rounded-xl border border-paper-300 bg-white px-2 text-sm font-semibold dark:border-night-700 dark:bg-night-800">
           {versions.map((v) => <option key={v.id} value={v.id}>{v.abbr} · {v.name}</option>)}
         </select>
@@ -323,6 +325,7 @@ export default function App() {
         </div>
       )}
 
+      <Paywall />
       <nav className="grid grid-cols-6 border-t border-paper-200 bg-white pb-[env(safe-area-inset-bottom)] dark:border-night-700 dark:bg-night-900">
         {TABS.map(([id, label, Icon]) => (
           <button key={id} onClick={() => setTab(id)} className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-semibold ${tab === id ? 'text-gold-600 dark:text-gold-400' : 'text-stone-500 dark:text-stone-400'}`}>

@@ -8,6 +8,7 @@ import { Empty, Seg, Sheet } from '../ui.jsx';
 import { MediaChoice, Row, Swatches } from './ScreenTab.jsx';
 import { GoLiveSection, ObsGuide } from './GoLive.jsx';
 import { PipSettings } from './PipControls.jsx';
+import { ProLock, useGate, useUnlocked } from '../Pro.jsx';
 
 const BARS = ['#0b1f3a', '#000000', '#12301f', '#3a0d12', '#2b1a45', '#ffffff'];
 const ACCENTS = ['#e2b232', '#ffffff', '#ef4444', '#22c55e', '#38bdf8'];
@@ -54,6 +55,7 @@ function CameraSection() {
 
   const turnOn = async () => {
     setNote('');
+    if (!useStore.getState().allowed('live')) return;
     if (IS_NATIVE && remote) {
       // The camera phone reaches this phone through the screen server, so Wi-Fi screens must be on.
       await Screen.startServer().then(setSt).catch(() => {});
@@ -73,13 +75,13 @@ function CameraSection() {
   return (
     <section className="card space-y-3 p-4">
       <div className="flex items-center gap-2">
-        <div className="label mr-auto">Live video</div>
+        <div className="label mr-auto">Live video <ProLock feature="live" /></div>
         <span className={`rounded-md px-2 py-0.5 text-[11px] font-bold ${cam.on ? 'bg-red-600 text-white' : 'bg-paper-200 text-stone-500 dark:bg-night-700'}`}>{cam.on ? 'CAMERA ON' : 'OFF'}</span>
       </div>
       <p className="text-sm text-stone-500 dark:text-stone-400">The camera fills the screen and verses, songs and names appear in a bar along the bottom.</p>
       {cam.on
         ? <button onClick={() => setCam({ on: false })} className="btn-soft w-full"><VideoOff size={18} /> Turn off live video</button>
-        : <button onClick={turnOn} className="btn-gold w-full"><Video size={18} /> Turn on live video</button>}
+        : <button onClick={turnOn} className="btn-gold w-full"><Video size={18} /> Turn on live video <ProLock feature="live" /></button>}
 
       {IS_NATIVE ? (
         <>
@@ -116,11 +118,12 @@ function CameraSection() {
 }
 
 function CameraDeviceSection({ onCameraMode }) {
+  const gate = useGate();
   return (
     <section className="card space-y-3 p-4">
       <div className="label">Use this {IS_NATIVE ? 'phone' : 'device'} as a camera</div>
       <p className="text-sm text-stone-500 dark:text-stone-400">Point this {IS_NATIVE ? 'phone' : 'device'} at the pulpit and send its camera over Wi-Fi to the main phone’s projector and screens. No internet needed.</p>
-      <button onClick={onCameraMode} className="btn-soft w-full"><Smartphone size={18} /> Open camera mode</button>
+      <button onClick={() => gate('wifi') && onCameraMode()} className="btn-soft w-full"><Smartphone size={18} /> Open camera mode <ProLock feature="wifi" /></button>
     </section>
   );
 }
@@ -156,7 +159,7 @@ function WatermarkSection() {
   const { watermark: w, setWatermark } = useStore();
   return (
     <section className="card space-y-3 p-4">
-      <div className="label">Church logo watermark</div>
+      <div className="label">Church logo watermark <ProLock feature="watermark" /></div>
       <p className="text-sm text-stone-500 dark:text-stone-400">Your logo in a corner of the screen and the live stream. Pick a picture from Media (a PNG with a see-through background looks best).</p>
       <MediaChoice label="Watermark picture" value={w.id} onChange={(id) => setWatermark({ id })} none="No logo" imagesOnly />
       {w.id && (
@@ -177,6 +180,8 @@ function WatermarkSection() {
 }
 
 function OverlaySection() {
+  const unlocked = useUnlocked('live');
+  const gate = useGate();
   const [urls, setUrls] = useState([]);
   const [server, setServer] = useState(false);
   const [copied, setCopied] = useState('');
@@ -193,8 +198,9 @@ function OverlaySection() {
     <section className="card space-y-3 p-4">
       <div className="label">Overlay for OBS / vMix</div>
       <p className="text-sm text-stone-500 dark:text-stone-400">For Facebook or YouTube streams: add a <b>Browser source</b> in OBS (or a Web Browser input in vMix), 1920 × 1080, with this address. It shows only the lower third and ticker on a see-through background, on top of your camera.</p>
-      {IS_NATIVE && !server && <button onClick={() => Screen.startServer().then((s) => { setServer(s.server); setUrls(s.urls); }).catch(() => {})} className="btn-soft w-full">Turn on Wi-Fi screens to get the address</button>}
-      {links.map((u) => (
+      {!unlocked && <button onClick={() => gate('live')} className="btn w-full bg-green-600 text-white">Unlock the overlay with Pro</button>}
+      {unlocked && IS_NATIVE && !server && <button onClick={() => Screen.startServer().then((s) => { setServer(s.server); setUrls(s.urls); }).catch(() => {})} className="btn-soft w-full">Turn on Wi-Fi screens to get the address</button>}
+      {unlocked && links.map((u) => (
         <div key={u} className="flex items-center gap-2">
           <code className="min-w-0 flex-1 select-all truncate rounded-xl bg-paper-100 px-3 py-2.5 text-sm font-bold dark:bg-night-800">{u}</code>
           <button onClick={() => copy(u)} aria-label="Copy address" className="icon-btn h-11 w-11 bg-paper-200 dark:bg-night-700"><Copy size={16} /></button>
@@ -225,7 +231,7 @@ function PeopleSection() {
   const [editing, setEditing] = useState(null);
   return (
     <section className="card space-y-3 p-4">
-      <div className="flex items-center justify-between"><div className="label">Names &amp; titles</div><button onClick={() => setEditing('new')} className="btn-soft min-h-9 px-3"><Plus size={16} /> Add</button></div>
+      <div className="flex items-center justify-between"><div className="label">Names &amp; titles <ProLock feature="live" /></div><button onClick={() => setEditing('new')} className="btn-soft min-h-9 px-3"><Plus size={16} /> Add</button></div>
       {!people.length ? <Empty>Add the preacher, worship leader or guest to show their name.</Empty>
         : <p className="text-xs text-stone-500 dark:text-stone-400">Tap a name to show its tag over whatever is on screen; tap again to hide it.</p>}
       {people.map((p) => {
@@ -254,7 +260,7 @@ function TickerSection() {
   return (
     <section className="card space-y-3 p-4">
       <div className="flex items-center gap-2">
-        <div className="label mr-auto">Scrolling announcement</div>
+        <div className="label mr-auto">Scrolling announcement <ProLock feature="live" /></div>
         <Seg label="Ticker" value={ticker.on} onChange={(on) => setTicker({ on })} options={[[false, 'Off'], [true, 'On']]} />
       </div>
       <textarea value={ticker.text} onChange={(e) => setTicker({ text: e.target.value })} rows={3} aria-label="Announcement text" placeholder="e.g. Welcome to our visitors · Bible study on Wednesday at 6pm · MoMo offering: 024 000 0000" className="field py-3" />
@@ -295,7 +301,7 @@ export default function LiveTab({ onCameraMode }) {
       <PeopleSection />
       <TickerSection />
       <section className="card space-y-3 p-4">
-        <div className="label">Picture-in-picture box</div>
+        <div className="label">Picture-in-picture box <ProLock feature="live" /></div>
         <p className="text-sm text-stone-500 dark:text-stone-400">Show a picture, video, PDF or document page in a box over the live video: in Media, open an item and choose “In a box”.</p>
         <PipSettings />
       </section>

@@ -11,3 +11,4 @@ trap 'kill $SERVER' EXIT
 sleep 1
 mkdir -p tests/out
 LD_LIBRARY_PATH=$HOME/.local/chromium-libs/root/usr/lib/x86_64-linux-gnu node tests/e2e.mjs "$@"
+LD_LIBRARY_PATH=$HOME/.local/chromium-libs/root/usr/lib/x86_64-linux-gnu node tests/licence.mjs

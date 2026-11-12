@@ -6,6 +6,7 @@ import { BUILTIN, backupData, decodeXml, deleteImported, parseXmlBible, readBack
 import { FONTS } from '../lib/fonts.js';
 import { Seg } from '../ui.jsx';
 import { Thumb } from './MediaTab.jsx';
+import { ProLock, ProSection, useGate } from '../Pro.jsx';
 
 const BGS = ['#000000', '#0b1f3a', '#12301f', '#3a0d12', '#2b1a45', '#ffffff'];
 const FGS = ['#ffffff', '#f4db8c', '#000000'];
@@ -40,6 +41,7 @@ const Dot = ({ on }) => <span className={`inline-block h-2.5 w-2.5 shrink-0 roun
 
 // Phone app only: the projector or TV on a cable or wireless display, and screens that join over Wi-Fi.
 function PhoneScreens() {
+  const gate = useGate();
   const [st, setSt] = useState({ display: false, displayName: '', server: false, urls: [], clients: 0 });
   const [error, setError] = useState('');
   useEffect(() => {
@@ -72,7 +74,7 @@ function PhoneScreens() {
             </div>
           )
           : <p className="text-sm text-red-600 dark:text-red-400">This phone is not on a network. Join a Wi-Fi network or turn on the hotspot.</p>)}
-        <button onClick={() => run(st.server ? Screen.stopServer() : Screen.startServer())} className={`${st.server ? 'btn-soft' : 'btn-gold'} w-full`}><Wifi size={18} /> {st.server ? 'Turn off Wi-Fi screens' : 'Turn on Wi-Fi screens'}</button>
+        <button onClick={() => (st.server ? run(Screen.stopServer()) : gate('wifi') && run(Screen.startServer()))} className={`${st.server ? 'btn-soft' : 'btn-gold'} w-full`}><Wifi size={18} /> {st.server ? 'Turn off Wi-Fi screens' : 'Turn on Wi-Fi screens'} <ProLock feature="wifi" /></button>
         {!st.server && <p className="text-sm text-stone-500 dark:text-stone-400">No internet is needed, only a shared Wi-Fi network or this phone's hotspot.</p>}
       </section>
       {error && <p className="px-1 text-sm text-red-600 dark:text-red-400">{error}</p>}
@@ -82,6 +84,7 @@ function PhoneScreens() {
 
 export default function ScreenTab() {
   const { style, setStyle, themeMode, setThemeMode, imported, addImported, removeImported, setVersion, idleId, setIdle, songs, addSongs } = useStore();
+  const gate = useGate();
   const file = useRef(null);
   const backupFile = useRef(null);
   const [msg, setMsg] = useState(null);
@@ -128,6 +131,7 @@ export default function ScreenTab() {
   };
 
   const saveBackup = async () => {
+    if (!gate('backup')) return;
     setMsg({ text: 'Preparing backup…' });
     try {
       const text = await backupData(imported, songs);
@@ -162,6 +166,7 @@ export default function ScreenTab() {
 
   return (
     <div className="space-y-4">
+      <ProSection />
       {IS_NATIVE ? <PhoneScreens /> : (
         <section className="card space-y-3 p-4">
           <div className="label">Screen</div>
@@ -233,8 +238,8 @@ export default function ScreenTab() {
         <input ref={file} type="file" accept=".xml,text/xml,application/xml,.zip,application/zip" multiple hidden onChange={importFiles} />
         <button onClick={() => file.current.click()} className="btn-soft w-full"><Upload size={18} /> Add Bibles (XML or zip)</button>
         <div className="grid grid-cols-2 gap-2">
-          <button onClick={saveBackup} className="btn-soft"><Download size={16} /> Back up</button>
-          <button onClick={() => backupFile.current.click()} className="btn-soft"><ArchiveRestore size={16} /> Restore</button>
+          <button onClick={saveBackup} className="btn-soft"><Download size={16} /> Back up <ProLock feature="backup" /></button>
+          <button onClick={() => gate('backup') && backupFile.current.click()} className="btn-soft"><ArchiveRestore size={16} /> Restore <ProLock feature="backup" /></button>
         </div>
         <input ref={backupFile} type="file" accept=".json,application/json" hidden onChange={restore} />
         <p className="text-xs text-stone-500 dark:text-stone-400">The backup holds your added Bibles and songs, to move them to another phone or laptop.</p>

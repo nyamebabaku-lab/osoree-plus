@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { MAX_REFS, slideKey } from './lib/slides.js';
 import { STARTER_SONGS } from './lib/songs.js';
+import { isUnlocked } from './lib/licence.js';
 
 export const DEFAULT_STYLE = {
   bg: '#000000', fg: '#ffffff', accent: '#e2b232', align: 'center', font: 'serif', size: 'M',
@@ -13,7 +14,15 @@ export const DEFAULT_LT = { bg: '#0b1f3a', opacity: 0.8, fg: '#ffffff', accent: 
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const sameRef = (x, y) => x.b === y.b && x.c === y.c && x.v === y.v && (x.n || 1) === (y.n || 1);
 
-export const useStore = create(persist((set, get) => ({
+export const useStore = create(persist((set, get) => {
+  // Pro features: true when allowed on this device; otherwise opens the Pro sheet.
+  const allowed = (feature) => {
+    const st = get().licStatus;
+    if (!st || isUnlocked(st, feature)) return true;
+    set({ paywall: feature });
+    return false;
+  };
+  return {
   versionId: 'kjv',
   compareId: '', // a second version shown beside the first; '' = off
   themeMode: 'dark', // dark | light | system
@@ -53,6 +62,11 @@ export const useStore = create(persist((set, get) => ({
     quality: '720p', shape: 'landscape', audioInput: -1,
   },
   onAir: false, // a live stream is running (not saved)
+  // Pro (see lib/licence.js)
+  licence: '', // the licence code pasted on this device
+  trialStart: 0, // seconds; set the first time the app opens
+  lastSeen: 0, // latest time the app has seen (a clock wound back cannot stretch the trial)
+  deviceCode: '', licStatus: null, paywall: '', // worked out each time; not saved
   camAddress: '', // camera mode: the main phone's address
   camStatus: null, // this phone's camera while live video is on: { state, screens } or { error }
 
@@ -68,6 +82,7 @@ export const useStore = create(persist((set, get) => ({
   goLive: (slide) => {
     // A name is a tag laid over whatever is showing: tapping it shows or hides the tag.
     if (slide.type === 'name') { get().toggleName(slide.personId); return; }
+    if (slide.type === 'pdf' && !allowed('docs')) return;
     const { live, mode, combine, history, video } = get();
     let next = slide;
     if (combine && slide.type === 'verse' && live?.type === 'verse' && mode === 'show') {
@@ -100,17 +115,21 @@ export const useStore = create(persist((set, get) => ({
     set({ live: { type: 'verse', refs: live.refs.filter((_, k) => k !== i) } });
   },
   setMode: (mode) => set({ mode }),
-  setCam: (patch) => set({ cam: { ...get().cam, ...patch } }),
+  setCam: (patch) => { if (patch.on && !allowed('live')) return; set({ cam: { ...get().cam, ...patch } }); },
   setLt: (patch) => set({ lt: { ...get().lt, ...patch } }),
   setCamAddress: (camAddress) => set({ camAddress }),
   setCamStatus: (camStatus) => set({ camStatus }),
-  setTicker: (patch) => set({ ticker: { ...get().ticker, ...patch } }),
-  setWatermark: (patch) => set({ watermark: { ...get().watermark, ...patch } }),
+  setTicker: (patch) => { if (patch.on && !allowed('live')) return; set({ ticker: { ...get().ticker, ...patch } }); },
+  setWatermark: (patch) => { if (patch.id && !allowed('watermark')) return; set({ watermark: { ...get().watermark, ...patch } }); },
   setNameTag: (patch) => set({ nameTag: { ...get().nameTag, ...patch } }),
-  toggleName: (id) => set({ nameOn: get().nameOn === id ? '' : id }),
+  toggleName: (id) => { if (get().nameOn !== id && !allowed('live')) return; set({ nameOn: get().nameOn === id ? '' : id }); },
   setStreamCfg: (patch) => set({ streamCfg: { ...get().streamCfg, ...patch } }),
   setStreamTarget: (id, patch) => set({ streamCfg: { ...get().streamCfg, targets: get().streamCfg.targets.map((t) => (t.id === id ? { ...t, ...patch } : t)) } }),
   setOnAir: (onAir) => set({ onAir }),
+  setLicence: (licence) => set({ licence }),
+  setLicState: (patch) => set(patch),
+  allowed, // for components: useStore.getState().allowed('stream')
+  openPaywall: (paywall) => set({ paywall }),
   savePerson: (p) => {
     const people = get().people;
     set({ people: people.some((x) => x.id === p.id) ? people.map((x) => (x.id === p.id ? p : x)) : [...people, { ...p, id: p.id || newId() }] });
@@ -120,7 +139,11 @@ export const useStore = create(persist((set, get) => ({
     set({ people: get().people.filter((x) => x.id !== id), plan: get().plan.filter((x) => x.personId !== id), live: live?.personId === id ? null : live, nameOn: get().nameOn === id ? '' : get().nameOn });
   },
   setVideo: (patch) => set({ video: { ...get().video, ...patch } }),
-  showPip: (mediaId, page = 0) => set({ pip: { mediaId, page, playing: true, seq: get().pip.seq + 1 } }),
+  showPip: (mediaId, page = 0) => {
+    if (!allowed('live')) return;
+    if (get().media.find((m) => m.id === mediaId)?.kind === 'pdf' && !allowed('docs')) return;
+    set({ pip: { mediaId, page, playing: true, seq: get().pip.seq + 1 } });
+  },
   hidePip: () => set({ pip: { ...get().pip, mediaId: '' } }),
   setPip: (patch) => set({ pip: { ...get().pip, ...patch } }),
   setPipLook: (patch) => set({ pipLook: { ...get().pipLook, ...patch } }),
@@ -176,7 +199,8 @@ export const useStore = create(persist((set, get) => ({
     versionId: get().versionId === id ? 'kjv' : get().versionId,
     compareId: get().compareId === id ? '' : get().compareId,
   }),
-}), {
+};
+}, {
   name: 'osoree-plus',
   version: 4,
   // Version 1 kept single verses as { b, c, v, n }; version 2 darkened pictures with "dim" instead of blending.
@@ -194,7 +218,7 @@ export const useStore = create(persist((set, get) => ({
       style: { ...DEFAULT_STYLE, ...(old.style || {}) },
     };
   },
-  partialize: ({ video, camStatus, onAir, nameOn, view, pip, ...rest }) => rest, // eslint-disable-line no-unused-vars
+  partialize: ({ video, camStatus, onAir, nameOn, view, pip, deviceCode, licStatus, paywall, ...rest }) => rest, // eslint-disable-line no-unused-vars
 }));
 
 // Is verse v of chapter c of book b part of what is showing?

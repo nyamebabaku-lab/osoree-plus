@@ -3,6 +3,7 @@ import { Eye, EyeOff, Radio, RefreshCw, Square } from 'lucide-react';
 import { useStore } from '../store.js';
 import { IS_NATIVE, Screen } from '../lib/output.js';
 import { Seg } from '../ui.jsx';
+import { ProLock } from '../Pro.jsx';
 
 // Where each platform's server address and stream key come from.
 export const PLATFORMS = {
@@ -71,6 +72,7 @@ function GoLivePanel() {
 
   const goLive = async () => {
     setError('');
+    if (!useStore.getState().allowed('stream')) return;
     const bad = chosen.find((t) => !/^rtmps?:\/\//i.test(t.url.trim()) || (!t.key && !/\/[^/]{8,}$/.test(t.url.trim())));
     if (!chosen.length) { setError('Tick at least one platform.'); return; }
     if (bad) { setError(`${PLATFORMS[bad.platform].name}: fill in the server address (rtmp:// or rtmps://) and the stream key.`); return; }
@@ -152,7 +154,7 @@ function GoLivePanel() {
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {onAir
         ? <button onClick={end} className="btn w-full bg-red-600 text-white"><Square size={16} /> End stream</button>
-        : <button onClick={goLive} disabled={busy} className="btn-gold w-full"><Radio size={18} /> {busy ? 'Starting…' : 'Go live'}</button>}
+        : <button onClick={goLive} disabled={busy} className="btn-gold w-full"><Radio size={18} /> {busy ? 'Starting…' : 'Go live'} <ProLock feature="stream" /></button>}
       <p className="text-xs text-stone-500 dark:text-stone-400">Keep Ɔsɔreɛ Plus open and the phone plugged in while live. Stream keys stay on this phone only.</p>
     </section>
   );

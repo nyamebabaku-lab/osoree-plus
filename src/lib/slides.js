@@ -70,23 +70,26 @@ export function screenState(st, { bible, compare, songs, media }) {
     font: fontStack(style.font), size: style.size, blend: style.blend, shadow: style.shadow,
     bgMedia: mediaRef(media.find((m) => m.id === style.bgId)),
   };
+  // Pro features that are locked on this device (trial over, no licence) are left out.
+  const locked = new Set(st.locked || []);
+  if (locked.has('docs') && st.live?.type === 'pdf') return screenState({ ...st, live: null }, { bible, compare, songs, media });
   // Shared by every message: the camera, the lower-third look and the scrolling ticker.
   const extra = {
     // 'phone': the preview takes the app's own camera, the projector opens it directly (no network needed),
     // and Wi-Fi screens receive it over Wi-Fi.
-    cam: cam?.on ? { source: cam.source, deviceId: cam.deviceId, facing: cam.facing, mirror: cam.mirror } : null,
+    cam: cam?.on && !locked.has('live') ? { source: cam.source, deviceId: cam.deviceId, facing: cam.facing, mirror: cam.mirror } : null,
     lt: lt && { ...lt, font: fontStack(lt.font) },
-    ticker: ticker?.on && ticker.text.trim() ? { text: ticker.text.trim(), speed: ticker.speed } : null,
-    watermark: (() => { const m = watermark?.id && media.find((x) => x.id === watermark.id && x.kind === 'image'); return m ? { src: m.src, corner: watermark.corner, x: watermark.x ?? 3, y: watermark.y ?? 4, size: watermark.size, opacity: watermark.opacity, all: watermark.where === 'all' } : null; })(),
+    ticker: ticker?.on && ticker.text.trim() && !locked.has('live') ? { text: ticker.text.trim(), speed: ticker.speed } : null,
+    watermark: (() => { const m = !locked.has('watermark') && watermark?.id && media.find((x) => x.id === watermark.id && x.kind === 'image'); return m ? { src: m.src, corner: watermark.corner, x: watermark.x ?? 3, y: watermark.y ?? 4, size: watermark.size, opacity: watermark.opacity, all: watermark.where === 'all' } : null; })(),
     // Picture-in-picture box over whatever is showing.
     pip: (() => {
-      const m = pip?.mediaId && media.find((x) => x.id === pip.mediaId);
-      if (!m) return null;
+      const m = !locked.has('live') && pip?.mediaId && media.find((x) => x.id === pip.mediaId);
+      if (!m || (m.kind === 'pdf' && locked.has('docs'))) return null;
       const src = m.kind === 'pdf' ? m.pages[Math.min(pip.page || 0, m.pages.length - 1)] : m.src;
       return { src, kind: m.kind === 'video' ? 'video' : 'image', ...pipLook, playing: pip.playing, seq: pip.seq };
     })(),
     // The name tag lies over whatever is showing.
-    nametag: (() => { const p = nameOn && people.find((x) => x.id === nameOn); return p ? { name: p.name, title: p.title || '', ...(nameTag || {}) } : null; })(),
+    nametag: (() => { const p = !locked.has('live') && nameOn && people.find((x) => x.id === nameOn); return p ? { name: p.name, title: p.title || '', ...(nameTag || {}) } : null; })(),
   };
   const msg = (m) => ({ ...m, ...extra });
   if (mode === 'black') return { kind: 'black', style: look };

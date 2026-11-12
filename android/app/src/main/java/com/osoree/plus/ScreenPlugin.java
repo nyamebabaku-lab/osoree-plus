@@ -128,6 +128,15 @@ public class ScreenPlugin extends Plugin implements DisplayManager.DisplayListen
         call.resolve(r);
     }
 
+    /** This phone's Android ID: the same after reinstalling the app, new only after a factory reset. Used for licences. */
+    @PluginMethod
+    public void getDeviceId(PluginCall call) {
+        String id = Settings.Secure.getString(getContext().getContentResolver(), Settings.Secure.ANDROID_ID);
+        JSObject r = new JSObject();
+        r.put("id", id == null ? "" : id);
+        call.resolve(r);
+    }
+
     // ------------------------------------------------------------------ live streaming (YouTube, Facebook…)
 
     private final StreamEngine stream = new StreamEngine();
