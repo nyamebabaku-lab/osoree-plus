@@ -38,9 +38,15 @@
   #lt { position: fixed; left: 4vw; right: 4vw; bottom: 5vh; opacity: 0; transform: translateY(1.5vh); transition: opacity .25s, transform .25s; pointer-events: none; }
   #lt.on { opacity: 1; transform: none; }
   #lt.with-ticker { bottom: calc(5vh + 6.2vh); }
-  #lt.name { right: auto; left: 3vw; bottom: 3vh; max-width: 46vw; }
-  #lt.name.with-ticker { bottom: calc(6.2vh + 1.6vh); }
-  #lt.name #ltbox { padding: .4em .8em .45em; }
+  /* name tag: its own layer over whatever is showing; position and size come from the operator */
+  #nt { position: fixed; z-index: 6; max-width: 70vw; opacity: 0; transform: translateY(1vh); transition: opacity .25s, transform .25s; pointer-events: none; }
+  #nt.on { opacity: 1; transform: none; }
+  #ntbox { position: relative; padding: .38em .85em .45em 1.05em; border-radius: .3em; overflow: hidden; }
+  #ntbg { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
+  #ntbar { position: absolute; left: 0; top: 0; bottom: 0; width: .28em; }
+  #nttext { position: relative; }
+  #ntname { margin: 0; font-weight: 800; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #nttitle { margin: .12em 0 0; font-size: .62em; font-weight: 600; opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* church logo watermark */
   #wm { position: fixed; z-index: 5; opacity: 0; transition: opacity .3s; pointer-events: none; }
   #wm img { display: block; width: 100%; height: auto; }
@@ -69,6 +75,7 @@
 <div id="lt"><div id="ltbox"><div id="ltbg"></div><div id="ltbar"></div><div id="lttext"></div></div></div>
 <div id="ticker"><div id="tickerbg"></div><div id="tickertext"></div></div>
 <div id="wm"><img alt=""></div>
+<div id="nt"><div id="ntbox"><div id="ntbg"></div><div id="ntbar"></div><div id="nttext"><p id="ntname"></p><p id="nttitle"></p></div></div></div>
 <div id="hint" class="note" hidden>Click for full screen</div>
 <div id="sound" class="note" hidden>Click to turn on the sound</div>
 <div id="lost" class="note" hidden>Reconnecting to the phone…</div>
@@ -251,7 +258,6 @@
   // ---- lower third + ticker ---------------------------------------------------------------
   var lt = $('lt'), ltText = $('lttext'), ticker = $('ticker'), tickerText = $('tickertext');
   var LT_CAP = { S: 0.045, M: 0.058, L: 0.075 }, LT_MAX = { S: 0.24, M: 0.32, L: 0.42 };
-  var NAME_CAP = { S: 0.032, M: 0.04, L: 0.05 };
   function hexA(hex, a) {
     var h = (hex || '#000').replace('#', ''); if (h.length === 3) h = h.replace(/./g, '$&$&');
     var n = parseInt(h, 16); return 'rgba(' + (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255) + ',' + (a == null ? 0.8 : a) + ')';
@@ -264,7 +270,6 @@
     }
     if (s.kind === 'song') return { label: s.title, main: s.lines.join(' / ') };
     if (s.kind === 'strongs') { var e = s.entry || {}; return { label: "Strong's " + e.num + (s.word ? ' · “' + s.word + '”' : '') + (s.ref ? ' · ' + s.ref : ''), main: (e.lemma || '') + '  ' + (e.xlit || '') + ' — ' + (e.def || '') }; }
-    if (s.kind === 'name') return { main: s.name, sub: s.title, big: true };
     return null;
   }
   function showLower(s) {
@@ -282,9 +287,9 @@
     ltText.style.fontFamily = L.font || 'system-ui, sans-serif';
     ltText.style.textAlign = L.align === 'center' ? 'center' : 'left';
     main.style.textTransform = st.upper ? 'uppercase' : 'none';
-    lt.className = 'on' + (s.ticker ? ' with-ticker' : '') + (c.big ? ' name' : '');
+    lt.className = 'on' + (s.ticker ? ' with-ticker' : '');
     // Largest text that keeps the bar within its share of the screen. A name tag stays small.
-    var H = window.innerHeight, cap = H * (c.big ? (NAME_CAP[L.size] || NAME_CAP.M) : (LT_CAP[L.size] || LT_CAP.M)), max = H * (c.big ? 0.2 : (LT_MAX[L.size] || LT_MAX.M));
+    var H = window.innerHeight, cap = H * (LT_CAP[L.size] || LT_CAP.M), max = H * (LT_MAX[L.size] || LT_MAX.M);
     var box = $('ltbox'), lo = 8, hi = cap;
     lt.style.fontSize = hi + 'px';
     if (box.offsetHeight > max) {
@@ -295,15 +300,44 @@
   var wm = $('wm'), wmImg = wm.querySelector('img'), wmSrc = '';
   function showWatermark(s) {
     var w = s.kind !== 'black' && s.watermark;
-    if (!w || !(w.all || OVERLAY || STREAM)) { wm.style.opacity = 0; return; }
+    if (!w || !(w.all || OVERLAY || STREAM || PREVIEW)) { wm.style.opacity = 0; return; }
     if (w.src !== wmSrc) { wmSrc = w.src; wmImg.removeAttribute('src'); resolve(w.src, function (url) { if (wmSrc === w.src) wmImg.src = url; }); }
-    var size = (w.size || 0.12) * 100 + 'vw', gap = '3vmin';
-    wm.style.width = size;
-    wm.style.top = w.corner[0] === 't' ? gap : 'auto';
-    wm.style.bottom = w.corner[0] === 'b' ? (s.ticker ? 'calc(6.2vh + ' + gap + ')' : gap) : 'auto';
-    wm.style.left = w.corner[1] === 'l' ? gap : 'auto';
-    wm.style.right = w.corner[1] === 'r' ? gap : 'auto';
+    var gx = (w.x == null ? 3 : w.x) + 'vw', gy = (w.y == null ? 4 : w.y) + 'vh';
+    wm.style.width = (w.size || 0.1) * 100 + 'vw';
+    wm.style.top = w.corner[0] === 't' ? gy : 'auto';
+    wm.style.bottom = w.corner[0] === 'b' ? (s.ticker ? 'calc(6.2vh + ' + gy + ')' : gy) : 'auto';
+    wm.style.left = w.corner[1] === 'l' ? gx : 'auto';
+    wm.style.right = w.corner[1] === 'r' ? gx : 'auto';
     wm.style.opacity = w.opacity == null ? 0.85 : w.opacity;
+  }
+
+  // Name tag: where the operator put it, kept above the verse bar and the ticker when those are showing.
+  var nt = $('nt');
+  function showNameTag(s) {
+    var t = s.kind !== 'black' && s.nametag;
+    if (!t) { nt.className = ''; return; }
+    var L = s.lt || {};
+    $('ntname').textContent = t.name;
+    $('nttitle').textContent = t.title || '';
+    $('nttitle').style.display = t.title ? '' : 'none';
+    $('ntbg').style.background = hexA(L.bg || '#0b1f3a', Math.max(0.55, L.opacity == null ? 0.8 : L.opacity));
+    $('ntbar').style.background = L.accent || '#e2b232';
+    $('nttext').style.color = L.fg || '#fff';
+    $('nttext').style.fontFamily = L.font || 'system-ui, sans-serif';
+    var H = window.innerHeight, W = window.innerWidth;
+    nt.style.fontSize = Math.max(10, (t.size || 0.045) * H) + 'px';
+    var x = (t.x == null ? 3 : t.x) / 100 * W;
+    nt.style.left = nt.style.right = 'auto'; nt.style.transform = '';
+    if (t.align === 'right') nt.style.right = x + 'px';
+    else if (t.align === 'center') { nt.style.left = '50%'; nt.style.transform = 'translateX(-50%)'; }
+    else nt.style.left = x + 'px';
+    var bottom = (t.y == null ? 4 : t.y) / 100 * H + (s.ticker ? 0.062 * H : 0);
+    if (lt.className.indexOf('on') >= 0) { // stay clear of the verse / song bar
+      var r = $('ltbox').getBoundingClientRect();
+      if (r.height) bottom = Math.max(bottom, H - r.top + 0.015 * H);
+    }
+    nt.style.bottom = bottom + 'px';
+    nt.className = 'on';
   }
 
   var tickerKey = '';
@@ -393,7 +427,7 @@
 
   function paint(s) {
     var st = s.style || {};
-    var hasText = s.kind === 'verse' || s.kind === 'song' || s.kind === 'strongs' || s.kind === 'name';
+    var hasText = s.kind === 'verse' || s.kind === 'song' || s.kind === 'strongs';
     var lower = OVERLAY || !!s.cam;   // live video and the streaming overlay put text in the lower third
     showTicker(s);
     showWatermark(s);
@@ -404,10 +438,12 @@
       dim.style.opacity = 0;
       wrap.style.opacity = 0;
       if (hasText) showLower(s); else lt.className = '';
+      showNameTag(s);
       return;
     }
     showCam(null);
     lt.className = '';
+    showNameTag(s);
     stage.style.paddingBottom = s.ticker ? 'calc(6vmin + 6.2vh)' : '';
     bg.style.background = s.kind === 'black' ? '#000' : (st.bg || '#000');
     if (s.kind === 'black') showMedia(null);
@@ -430,11 +466,11 @@
 
   function render(s) {
     if (!s) return;
-    var key = s.kind + '|' + JSON.stringify(s.groups || s.lines || (s.entry && s.entry.num + s.ref) || s.name || '') + '|' + !!(s.cam || OVERLAY);
+    var key = s.kind + '|' + JSON.stringify(s.groups || s.lines || (s.entry && s.entry.num + s.ref) || '') + '|' + !!(s.cam || OVERLAY);
     var changed = key !== textKey;
     current = s; textKey = key;
     clearTimeout(timer);
-    var isText = s.kind === 'verse' || s.kind === 'song' || s.kind === 'strongs' || s.kind === 'name';
+    var isText = s.kind === 'verse' || s.kind === 'song' || s.kind === 'strongs';
     if (changed && isText && wrap.style.opacity === '1') {
       wrap.style.opacity = 0;
       timer = setTimeout(function () { paint(s); }, 180);

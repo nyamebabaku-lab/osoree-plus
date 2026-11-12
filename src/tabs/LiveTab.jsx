@@ -124,17 +124,46 @@ function CameraDeviceSection({ onCameraMode }) {
   );
 }
 
+function Slider({ label, value, min, max, step, onChange, show }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between text-sm font-semibold"><span>{label}</span><span className="tabular-nums text-stone-500">{show(value)}</span></div>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(parseFloat(e.target.value))} aria-label={label} className="mt-2 w-full accent-gold-500" />
+    </div>
+  );
+}
+
+function NameTagSection() {
+  const { nameTag: t, setNameTag, people, nameOn, toggleName } = useStore();
+  return (
+    <section className="card space-y-3 p-4">
+      <div className="flex items-center justify-between">
+        <div className="label">Name tag position &amp; size</div>
+        <button onClick={() => setNameTag({ align: 'left', x: 3, y: 4, size: 0.045 })} className="text-xs font-semibold text-stone-500">Reset</button>
+      </div>
+      {!nameOn && people[0] && <button onClick={() => toggleName(people[0].id)} className="btn-soft w-full text-sm">Show {people[0].name}’s tag to see changes</button>}
+      <Row label="Position"><Seg label="Name tag position" value={t.align} onChange={(align) => setNameTag({ align })} options={[['left', 'Left'], ['center', 'Centre'], ['right', 'Right']]} /></Row>
+      {t.align !== 'center' && <Slider label="From the side" value={t.x} min={0} max={40} step={1} onChange={(x) => setNameTag({ x })} show={(v) => `${v}%`} />}
+      <Slider label="From the bottom" value={t.y} min={0} max={80} step={1} onChange={(y) => setNameTag({ y })} show={(v) => `${v}%`} />
+      <Slider label="Size" value={t.size} min={0.025} max={0.09} step={0.005} onChange={(size) => setNameTag({ size })} show={(v) => `${Math.round(v * 1000) / 10}%`} />
+      <p className="text-xs text-stone-500 dark:text-stone-400">It always stays above the scrolling announcement and the verse/song bar. Colours follow the lower-third look.</p>
+    </section>
+  );
+}
+
 function WatermarkSection() {
   const { watermark: w, setWatermark } = useStore();
   return (
     <section className="card space-y-3 p-4">
       <div className="label">Church logo watermark</div>
-      <p className="text-sm text-stone-500 dark:text-stone-400">A small logo in a corner of the live stream. Pick a picture from Media (a PNG with a see-through background looks best).</p>
+      <p className="text-sm text-stone-500 dark:text-stone-400">Your logo in a corner of the screen and the live stream. Pick a picture from Media (a PNG with a see-through background looks best).</p>
       <MediaChoice label="Watermark picture" value={w.id} onChange={(id) => setWatermark({ id })} none="No logo" imagesOnly />
       {w.id && (
         <>
           <Row label="Corner"><Seg label="Watermark corner" value={w.corner} onChange={(corner) => setWatermark({ corner })} options={[['tl', '↖'], ['tr', '↗'], ['bl', '↙'], ['br', '↘']]} /></Row>
-          <Row label="Size"><Seg label="Watermark size" value={w.size} onChange={(size) => setWatermark({ size })} options={[[0.07, 'S'], [0.1, 'M'], [0.14, 'L']]} /></Row>
+          <Slider label="Size" value={w.size} min={0.04} max={0.35} step={0.01} onChange={(size) => setWatermark({ size })} show={(v) => `${Math.round(v * 100)}% of width`} />
+          <Slider label="From the side" value={w.x ?? 3} min={0} max={30} step={1} onChange={(x) => setWatermark({ x })} show={(v) => `${v}%`} />
+          <Slider label={w.corner[0] === 't' ? 'From the top' : 'From the bottom'} value={w.y ?? 4} min={0} max={40} step={1} onChange={(y) => setWatermark({ y })} show={(v) => `${v}%`} />
           <div>
             <div className="flex items-center justify-between text-sm font-semibold"><span>Strength</span><span className="text-stone-500">{Math.round(w.opacity * 100)}%</span></div>
             <input type="range" min="0.3" max="1" step="0.05" value={w.opacity} onChange={(e) => setWatermark({ opacity: parseFloat(e.target.value) })} aria-label="Watermark strength" className="mt-2 w-full accent-gold-500" />
@@ -191,20 +220,22 @@ function PersonEditor({ person, onClose }) {
 }
 
 function PeopleSection() {
-  const { people, deletePerson, goLive, addPlan, plan, live, mode } = useStore();
+  const { people, deletePerson, toggleName, nameOn, addPlan, plan } = useStore();
   const [editing, setEditing] = useState(null);
   return (
     <section className="card space-y-3 p-4">
       <div className="flex items-center justify-between"><div className="label">Names &amp; titles</div><button onClick={() => setEditing('new')} className="btn-soft min-h-9 px-3"><Plus size={16} /> Add</button></div>
-      {!people.length && <Empty>Add the preacher, worship leader or guest to show their name.</Empty>}
+      {!people.length ? <Empty>Add the preacher, worship leader or guest to show their name.</Empty>
+        : <p className="text-xs text-stone-500 dark:text-stone-400">Tap a name to show its tag over whatever is on screen; tap again to hide it.</p>}
       {people.map((p) => {
-        const on = mode === 'show' && live?.type === 'name' && live.personId === p.id;
+        const on = nameOn === p.id;
         const inPlan = plan.some((x) => slideKey(x) === slideKey({ type: 'name', personId: p.id }));
         return (
           <div key={p.id} className={`flex items-center gap-1 rounded-xl ${on ? 'bg-gold-400/20 ring-1 ring-gold-500' : 'bg-paper-100 dark:bg-night-800'}`}>
-            <button onClick={() => goLive({ type: 'name', personId: p.id })} className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left">
+            <button onClick={() => toggleName(p.id)} aria-pressed={on} className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left">
               <UserRound size={18} className="shrink-0 text-gold-500" />
-              <span className="min-w-0"><span className="block truncate text-sm font-bold">{p.name}</span>{p.title && <span className="block truncate text-xs text-stone-500 dark:text-stone-400">{p.title}</span>}</span>
+              <span className="min-w-0 flex-1"><span className="block truncate text-sm font-bold">{p.name}</span>{p.title && <span className="block truncate text-xs text-stone-500 dark:text-stone-400">{p.title}</span>}</span>
+              {on && <span className="shrink-0 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">ON</span>}
             </button>
             <button onClick={() => addPlan({ type: 'name', personId: p.id })} disabled={inPlan} aria-label={`Add ${p.name} to plan`} className="icon-btn disabled:opacity-30"><ListPlus size={16} /></button>
             <button onClick={() => setEditing(p)} aria-label={`Edit ${p.name}`} className="icon-btn"><Pencil size={16} /></button>
@@ -262,6 +293,7 @@ export default function LiveTab({ onCameraMode }) {
       <GoLiveSection />
       <PeopleSection />
       <TickerSection />
+      <NameTagSection />
       <LookSection />
       <WatermarkSection />
       <OverlaySection />

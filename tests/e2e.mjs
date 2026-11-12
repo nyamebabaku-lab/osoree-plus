@@ -191,26 +191,46 @@ await tab('Songs'); await page.getByText('Amazing Grace').first().click(); await
 ok('song as lower third', (await screen.locator('#lttext .lmain').textContent()).startsWith('Amazing grace! How sweet the sound / That saved'));
 await tab('Live');
 await page.getByRole('button', { name: 'Add', exact: true }).click(); await page.getByLabel('Name', { exact: true }).fill('Rev. Kwame Mensah'); await page.getByLabel('Title', { exact: true }).fill('Senior Pastor'); await page.getByRole('button', { name: 'Save' }).click();
-await page.getByRole('button', { name: /^Rev. Kwame Mensah Senior/ }).click(); s = await live(); ok('name live', s.kind === 'name' && s.name === 'Rev. Kwame Mensah' && s.title === 'Senior Pastor');
-await screen.waitForTimeout(500); ok('name in lower third', (await screen.locator('#lttext').innerText()).includes('Senior Pastor'));
-const tag = await screen.evaluate(() => { const r = document.getElementById('ltbox').getBoundingClientRect(); return { cls: document.getElementById('lt').className, left: r.left, width: r.width, bottom: innerHeight - r.bottom }; });
-ok('name tag is small at the bottom left', tag.cls.includes('name') && tag.left < 1280 * 0.05 && tag.width < 1280 * 0.5, JSON.stringify(tag));
+const ntBox = () => screen.evaluate(() => { const r = document.getElementById('ntbox').getBoundingClientRect(); const l = document.getElementById('ltbox').getBoundingClientRect(); return { on: document.getElementById('nt').className === 'on', name: document.getElementById('ntname').textContent, left: Math.round(r.left), right: Math.round(innerWidth - r.right), bottom: Math.round(innerHeight - r.bottom), top: Math.round(r.top), w: Math.round(r.width), font: parseFloat(document.getElementById('nt').style.fontSize), ltTop: Math.round(l.top) }; });
+await page.getByRole('button', { name: /^Rev. Kwame Mensah Senior/ }).click(); s = await live();
+ok('name tag lies over what is showing', s.kind === 'song' && s.nametag?.name === 'Rev. Kwame Mensah' && s.nametag.title === 'Senior Pastor', s.kind);
+await screen.waitForTimeout(500); let nb = await ntBox();
+ok('name tag small at the bottom left', nb.on && nb.name === 'Rev. Kwame Mensah' && nb.left < 1280 * 0.05 && nb.w < 1280 * 0.5, JSON.stringify(nb));
+ok('name tag stays above the song bar', nb.bottom > 720 - nb.ltTop, JSON.stringify(nb));
+ok('song bar still showing with the tag', (await screen.locator('#lttext .lmain').textContent()).startsWith('Amazing grace'));
 await page.getByLabel('Announcement text').fill('Welcome to all visitors · Bible study on Wednesday at 6pm');
 await page.getByRole('group', { name: 'Ticker' }).getByRole('button', { name: 'On' }).click(); await screen.waitForTimeout(400);
 ok('ticker runs', await screen.evaluate(() => document.getElementById('ticker').className === 'on' && document.getElementById('tickertext').textContent.startsWith('Welcome') && document.getElementById('lt').className.includes('with-ticker')));
 await page.getByLabel('Bar see-through').fill('0.5'); await screen.waitForTimeout(300);
 ok('bar see-through', (await screen.evaluate(() => document.getElementById('ltbg').style.background)).includes('0.5'));
+nb = await ntBox(); ok('name tag stays above the ticker', nb.bottom > 720 * 0.062, JSON.stringify(nb));
 await shot(screen, 'live-name.png');
+// name tag position and size
+await page.getByLabel('From the side', { exact: true }).first().fill('20'); await screen.waitForTimeout(300); nb = await ntBox();
+ok('name tag moves from the side', Math.abs(nb.left - 256) < 4, String(nb.left));
+await page.getByRole('group', { name: 'Name tag position' }).getByRole('button', { name: 'Right' }).click(); await screen.waitForTimeout(300); nb = await ntBox();
+ok('name tag on the right', Math.abs(nb.right - 256) < 4, String(nb.right));
+await page.getByRole('group', { name: 'Name tag position' }).getByRole('button', { name: 'Centre' }).click(); await screen.waitForTimeout(300); nb = await ntBox();
+ok('name tag centred', Math.abs(nb.left - nb.right) < 4, JSON.stringify(nb));
+await page.getByLabel('Size', { exact: true }).first().fill('0.07'); await screen.waitForTimeout(300); nb = await ntBox();
+ok('name tag size', Math.abs(nb.font - 0.07 * 720) < 1, String(nb.font));
+await page.getByRole('button', { name: 'Reset' }).first().click(); await screen.waitForTimeout(300);
+await page.getByRole('button', { name: /^Rev. Kwame Mensah Senior/ }).click(); await screen.waitForTimeout(400);
+ok('tap again hides the name tag', !(await ntBox()).on && !(await live()).nametag);
+await page.getByRole('button', { name: /^Rev. Kwame Mensah Senior/ }).click();
 // church logo watermark
 await page.getByRole('group', { name: 'Watermark picture' }).getByLabel('logo').click();
-await screen.waitForTimeout(400); ok('watermark only on the stream by default', await screen.evaluate(() => getComputedStyle(document.getElementById('wm')).opacity === '0'));
-await page.getByRole('group', { name: 'Watermark shows on' }).getByRole('button', { name: 'All screens' }).click();
+await screen.waitForFunction(() => getComputedStyle(document.getElementById('wm')).opacity !== '0' && document.querySelector('#wm img').naturalWidth > 0).then(() => ok('watermark shows on screens by default', true), () => ok('watermark shows on screens by default', false));
+ok('watermark in the phone preview', await page.frameLocator('iframe').locator('#wm').evaluate((e) => getComputedStyle(e).opacity !== '0'));
 await page.getByRole('group', { name: 'Watermark corner' }).getByRole('button', { name: '↘' }).click();
-await screen.waitForFunction(() => getComputedStyle(document.getElementById('wm')).opacity !== '0' && document.querySelector('#wm img').naturalWidth > 0).then(() => ok('watermark on all screens when chosen', true), () => ok('watermark on all screens when chosen', false));
-const wmBox = await screen.evaluate(() => { const r = document.getElementById('wm').getBoundingClientRect(); return { right: innerWidth - r.right, bottom: innerHeight - r.bottom, w: r.width }; });
-ok('watermark in the chosen corner, above the ticker', wmBox.right < 40 && wmBox.bottom > 720 * 0.062 && wmBox.w > 50, JSON.stringify(wmBox));
+const wmSec = page.locator('section', { hasText: 'Church logo watermark' });
+await wmSec.getByLabel('Size', { exact: true }).fill('0.2'); await wmSec.getByLabel('From the side', { exact: true }).fill('10'); await wmSec.getByLabel('From the bottom', { exact: true }).fill('5');
+await screen.waitForTimeout(400);
+const wmBox = await screen.evaluate(() => { const r = document.getElementById('wm').getBoundingClientRect(); return { right: Math.round(innerWidth - r.right), bottom: Math.round(innerHeight - r.bottom), w: Math.round(r.width) }; });
+ok('watermark size and position follow the sliders', Math.abs(wmBox.w - 256) < 3 && Math.abs(wmBox.right - 128) < 3 && Math.abs(wmBox.bottom - (36 + 45)) < 4, JSON.stringify(wmBox));
 await shot(screen, 'live-watermark.png');
 await page.getByRole('group', { name: 'Watermark shows on' }).getByRole('button', { name: 'Stream only' }).click();
+await screen.waitForFunction(() => getComputedStyle(document.getElementById('wm')).opacity === '0', null, { timeout: 3000 }).then(() => ok('watermark can be kept to the stream only', true), () => ok('watermark can be kept to the stream only', false));
 // overlay for OBS
 const ov = await ctx.newPage(); watch(ov, 'overlay'); await ov.setViewportSize({ width: 1280, height: 720 }); await ov.goto(base + 'display.html?overlay'); await ov.waitForTimeout(800);
 const ovs = await ov.evaluate(() => ({ cls: document.documentElement.className, bg: getComputedStyle(document.body).backgroundColor, cam: getComputedStyle(document.getElementById('cam')).display, lt: document.getElementById('lt').className, hint: document.getElementById('hint').hidden, cursor: document.body.className }));
@@ -223,6 +243,11 @@ ok('black stops the camera', await screen.evaluate(() => !document.querySelector
 await page.getByRole('button', { name: 'Black' }).click();
 await page.getByRole('button', { name: 'Turn off live video' }).click(); await page.getByRole('group', { name: 'Ticker' }).getByRole('button', { name: 'Off' }).click(); await screen.waitForTimeout(500);
 ok('back to full screen text', await screen.evaluate(() => getComputedStyle(document.getElementById('cam')).opacity === '0' && document.getElementById('lt').className === '' && document.getElementById('wrap').style.opacity === '1'));
+// the name tag also works without live video, over a full-screen verse
+await tab('Bible'); await inp.fill('ps 23 1'); await inp.press('Enter'); await screen.waitForTimeout(400);
+nb = await ntBox(); ok('name tag over a full-screen verse', nb.on && (await screen.locator('#wrap .text').first().textContent()).includes('shepherd'), JSON.stringify(nb));
+await shot(screen, 'name-over-verse.png');
+await page.getByLabel('Hide the name tag').click(); await screen.waitForTimeout(300); ok('hide the tag from the live panel', !(await ntBox()).on);
 await tab('Live'); await shot(page, 'op-live.png');
 
 // ---------- plan + persistence ----------

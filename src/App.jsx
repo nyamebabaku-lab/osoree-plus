@@ -88,6 +88,13 @@ function LivePanel({ bible, versions }) {
           <button onClick={() => s.addPlan(planSlide)} disabled={!live || inPlan} aria-label="Add what is showing to the plan" className="icon-btn h-8 w-8 disabled:opacity-30"><ListPlus size={18} /></button>
         </div>
 
+        {s.nameOn && (() => { const p = s.people.find((x) => x.id === s.nameOn); return p && (
+          <div className="flex items-center gap-2 rounded-lg bg-gold-400/15 px-2 py-1 text-xs">
+            <span className="font-bold text-gold-700 dark:text-gold-300">NAME TAG</span>
+            <span className="min-w-0 flex-1 truncate font-semibold">{p.name}</span>
+            <button onClick={() => s.toggleName(p.id)} aria-label="Hide the name tag" className="rounded p-1 hover:bg-paper-300 dark:hover:bg-night-700"><X size={12} /></button>
+          </div>
+        ); })()}
         {isVerse && live.refs.length > 1 && (
           <div className="flex flex-wrap gap-1.5">
             {live.refs.map((r, i) => (

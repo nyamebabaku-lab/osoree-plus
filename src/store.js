@@ -36,7 +36,9 @@ export const useStore = create(persist((set, get) => ({
   lt: DEFAULT_LT,
   people: [], // names for the lower third: [{ id, name, title }]
   ticker: { on: false, text: '', speed: 1 },
-  watermark: { id: '', corner: 'tr', size: 0.1, opacity: 0.85, where: 'stream' }, // church logo in a corner
+  watermark: { id: '', corner: 'tr', x: 3, y: 4, size: 0.1, opacity: 0.85, where: 'all' }, // church logo; x/y = % from the edges
+  nameOn: '', // the person whose name tag is showing (on top of whatever is on screen)
+  nameTag: { align: 'left', x: 3, y: 4, size: 0.045 }, // x = % from the side, y = % from the bottom, size = share of screen height
   // Live streaming from the phone: up to 3 platforms at once.
   streamCfg: {
     targets: [
@@ -60,6 +62,8 @@ export const useStore = create(persist((set, get) => ({
   setIdle: (idleId) => set({ idleId }),
 
   goLive: (slide) => {
+    // A name is a tag laid over whatever is showing: tapping it shows or hides the tag.
+    if (slide.type === 'name') { get().toggleName(slide.personId); return; }
     const { live, mode, combine, history, video } = get();
     let next = slide;
     if (combine && slide.type === 'verse' && live?.type === 'verse' && mode === 'show') {
@@ -93,6 +97,8 @@ export const useStore = create(persist((set, get) => ({
   setCamStatus: (camStatus) => set({ camStatus }),
   setTicker: (patch) => set({ ticker: { ...get().ticker, ...patch } }),
   setWatermark: (patch) => set({ watermark: { ...get().watermark, ...patch } }),
+  setNameTag: (patch) => set({ nameTag: { ...get().nameTag, ...patch } }),
+  toggleName: (id) => set({ nameOn: get().nameOn === id ? '' : id }),
   setStreamCfg: (patch) => set({ streamCfg: { ...get().streamCfg, ...patch } }),
   setStreamTarget: (id, patch) => set({ streamCfg: { ...get().streamCfg, targets: get().streamCfg.targets.map((t) => (t.id === id ? { ...t, ...patch } : t)) } }),
   setOnAir: (onAir) => set({ onAir }),
@@ -102,7 +108,7 @@ export const useStore = create(persist((set, get) => ({
   },
   deletePerson: (id) => {
     const { live } = get();
-    set({ people: get().people.filter((x) => x.id !== id), plan: get().plan.filter((x) => x.personId !== id), live: live?.personId === id ? null : live });
+    set({ people: get().people.filter((x) => x.id !== id), plan: get().plan.filter((x) => x.personId !== id), live: live?.personId === id ? null : live, nameOn: get().nameOn === id ? '' : get().nameOn });
   },
   setVideo: (patch) => set({ video: { ...get().video, ...patch } }),
   restartVideo: () => set({ video: { ...get().video, playing: true, seq: get().video.seq + 1 } }),
@@ -151,9 +157,11 @@ export const useStore = create(persist((set, get) => ({
   }),
 }), {
   name: 'osoree-plus',
-  version: 3,
+  version: 4,
   // Version 1 kept single verses as { b, c, v, n }; version 2 darkened pictures with "dim" instead of blending.
   migrate: (old, from) => {
+    // Version 3: the watermark showed on the stream only, with fixed margins; names replaced the screen.
+    if (from === 3) return { ...old, watermark: { ...old.watermark, x: 3, y: 4, where: 'all' }, live: old.live?.type === 'name' ? null : old.live };
     if (from === 2) return { ...old, style: { ...DEFAULT_STYLE, ...old.style, blend: old.style?.dim ?? DEFAULT_STYLE.blend } };
     const toSlide = (x) => ({ type: 'verse', refs: [{ b: x.b, c: x.c, v: x.v, n: x.n || 1 }] });
     return {
@@ -165,7 +173,7 @@ export const useStore = create(persist((set, get) => ({
       style: { ...DEFAULT_STYLE, ...(old.style || {}) },
     };
   },
-  partialize: ({ video, camStatus, onAir, ...rest }) => rest, // eslint-disable-line no-unused-vars
+  partialize: ({ video, camStatus, onAir, nameOn, ...rest }) => rest, // eslint-disable-line no-unused-vars
 }));
 
 // Is verse v of chapter c of book b part of what is showing?
