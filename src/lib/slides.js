@@ -64,7 +64,7 @@ const mediaRef = (m) => m && m.kind !== 'pdf' && { src: m.src, kind: m.kind, fit
 
 // The message every screen draws (public/display.html).
 export function screenState(st, { bible, compare, songs, media }) {
-  const { live, mode, style, video, view, idleId, songLines, cam, lt, ticker, watermark, people = [], nameOn, nameTag } = st;
+  const { live, mode, style, video, view, idleId, songLines, cam, lt, ticker, watermark, people = [], nameOn, nameTag, pip, pipLook } = st;
   const look = {
     bg: style.bg, fg: style.fg, accent: style.accent, align: style.align, upper: style.upper, showRef: style.showRef,
     font: fontStack(style.font), size: style.size, blend: style.blend, shadow: style.shadow,
@@ -78,6 +78,13 @@ export function screenState(st, { bible, compare, songs, media }) {
     lt: lt && { ...lt, font: fontStack(lt.font) },
     ticker: ticker?.on && ticker.text.trim() ? { text: ticker.text.trim(), speed: ticker.speed } : null,
     watermark: (() => { const m = watermark?.id && media.find((x) => x.id === watermark.id && x.kind === 'image'); return m ? { src: m.src, corner: watermark.corner, x: watermark.x ?? 3, y: watermark.y ?? 4, size: watermark.size, opacity: watermark.opacity, all: watermark.where === 'all' } : null; })(),
+    // Picture-in-picture box over whatever is showing.
+    pip: (() => {
+      const m = pip?.mediaId && media.find((x) => x.id === pip.mediaId);
+      if (!m) return null;
+      const src = m.kind === 'pdf' ? m.pages[Math.min(pip.page || 0, m.pages.length - 1)] : m.src;
+      return { src, kind: m.kind === 'video' ? 'video' : 'image', ...pipLook, playing: pip.playing, seq: pip.seq };
+    })(),
     // The name tag lies over whatever is showing.
     nametag: (() => { const p = nameOn && people.find((x) => x.id === nameOn); return p ? { name: p.name, title: p.title || '', ...(nameTag || {}) } : null; })(),
   };

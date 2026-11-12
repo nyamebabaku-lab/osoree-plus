@@ -30,7 +30,10 @@ export const useStore = create(persist((set, get) => ({
   history: [], // verse slides recently shown
   live: null, // the slide on screen (see lib/slides.js)
   mode: 'clear', // show | clear | black
-  video: { playing: true, seq: 0, loop: false, muted: false },
+  video: { playing: true, seq: 0, loop: false, muted: false, volume: 1 },
+  // Picture-in-picture: a picture, video or page in a box over whatever is showing (e.g. the live camera).
+  pip: { mediaId: '', page: 0, playing: true, seq: 0 },
+  pipLook: { x: 66, y: 6, w: 30, opacity: 1, volume: 1, radius: 2, border: true, shadow: true, loop: false, muted: false },
   view: { zoom: 1, x: 0, y: 0 }, // zoom and position of a picture, PDF or document page on screen (x, y in % of the screen)
   // Live video: a camera fills the screen and text moves to a lower third.
   cam: { on: false, source: 'device', deviceId: '', facing: 'environment', mirror: false },
@@ -117,6 +120,10 @@ export const useStore = create(persist((set, get) => ({
     set({ people: get().people.filter((x) => x.id !== id), plan: get().plan.filter((x) => x.personId !== id), live: live?.personId === id ? null : live, nameOn: get().nameOn === id ? '' : get().nameOn });
   },
   setVideo: (patch) => set({ video: { ...get().video, ...patch } }),
+  showPip: (mediaId, page = 0) => set({ pip: { mediaId, page, playing: true, seq: get().pip.seq + 1 } }),
+  hidePip: () => set({ pip: { ...get().pip, mediaId: '' } }),
+  setPip: (patch) => set({ pip: { ...get().pip, ...patch } }),
+  setPipLook: (patch) => set({ pipLook: { ...get().pipLook, ...patch } }),
   // Keeps the picture from being pushed off screen: at zoom z it may move at most (z - 1) / 2 of the screen each way.
   setView: (patch) => {
     const v = { ...get().view, ...patch };
@@ -157,6 +164,7 @@ export const useStore = create(persist((set, get) => ({
       plan: get().plan.filter((p) => p.mediaId !== id),
       live: live?.mediaId === id ? null : live,
       idleId: idleId === id ? '' : idleId,
+      pip: get().pip.mediaId === id ? { ...get().pip, mediaId: '' } : get().pip,
       watermark: get().watermark.id === id ? { ...get().watermark, id: '' } : get().watermark,
       style: style.bgId === id ? { ...style, bgId: '' } : style,
     });
@@ -186,7 +194,7 @@ export const useStore = create(persist((set, get) => ({
       style: { ...DEFAULT_STYLE, ...(old.style || {}) },
     };
   },
-  partialize: ({ video, camStatus, onAir, nameOn, view, ...rest }) => rest, // eslint-disable-line no-unused-vars
+  partialize: ({ video, camStatus, onAir, nameOn, view, pip, ...rest }) => rest, // eslint-disable-line no-unused-vars
 }));
 
 // Is verse v of chapter c of book b part of what is showing?

@@ -7,6 +7,7 @@ import { slideKey } from '../lib/slides.js';
 import { Empty, Seg, Sheet } from '../ui.jsx';
 import { MediaChoice, Row, Swatches } from './ScreenTab.jsx';
 import { GoLiveSection, ObsGuide } from './GoLive.jsx';
+import { PipSettings } from './PipControls.jsx';
 
 const BARS = ['#0b1f3a', '#000000', '#12301f', '#3a0d12', '#2b1a45', '#ffffff'];
 const ACCENTS = ['#e2b232', '#ffffff', '#ef4444', '#22c55e', '#38bdf8'];
@@ -293,6 +294,11 @@ export default function LiveTab({ onCameraMode }) {
       <GoLiveSection />
       <PeopleSection />
       <TickerSection />
+      <section className="card space-y-3 p-4">
+        <div className="label">Picture-in-picture box</div>
+        <p className="text-sm text-stone-500 dark:text-stone-400">Show a picture, video, PDF or document page in a box over the live video: in Media, open an item and choose “In a box”.</p>
+        <PipSettings />
+      </section>
       <NameTagSection />
       <LookSection />
       <WatermarkSection />

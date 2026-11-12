@@ -238,15 +238,16 @@ ok('bar see-through', (await screen.evaluate(() => document.getElementById('ltbg
 nb = await ntBox(); ok('name tag stays above the ticker', nb.bottom > 720 * 0.062, JSON.stringify(nb));
 await shot(screen, 'live-name.png');
 // name tag position and size
-await page.getByLabel('From the side', { exact: true }).first().fill('20'); await screen.waitForTimeout(300); nb = await ntBox();
+const ntSec = page.locator('section', { hasText: 'Name tag position' });
+await ntSec.getByLabel('From the side', { exact: true }).fill('20'); await screen.waitForTimeout(300); nb = await ntBox();
 ok('name tag moves from the side', Math.abs(nb.left - 256) < 4, String(nb.left));
 await page.getByRole('group', { name: 'Name tag position' }).getByRole('button', { name: 'Right' }).click(); await screen.waitForTimeout(300); nb = await ntBox();
 ok('name tag on the right', Math.abs(nb.right - 256) < 4, String(nb.right));
 await page.getByRole('group', { name: 'Name tag position' }).getByRole('button', { name: 'Centre' }).click(); await screen.waitForTimeout(300); nb = await ntBox();
 ok('name tag centred', Math.abs(nb.left - nb.right) < 4, JSON.stringify(nb));
-await page.getByLabel('Size', { exact: true }).first().fill('0.07'); await screen.waitForTimeout(300); nb = await ntBox();
+await ntSec.getByLabel('Size', { exact: true }).fill('0.07'); await screen.waitForTimeout(300); nb = await ntBox();
 ok('name tag size', Math.abs(nb.font - 0.07 * 720) < 1, String(nb.font));
-await page.getByRole('button', { name: 'Reset' }).first().click(); await screen.waitForTimeout(300);
+await ntSec.getByRole('button', { name: 'Reset' }).click(); await screen.waitForTimeout(300);
 await page.getByRole('button', { name: /^Rev. Kwame Mensah Senior/ }).click(); await screen.waitForTimeout(400);
 ok('tap again hides the name tag', !(await ntBox()).on && !(await live()).nametag);
 await page.getByRole('button', { name: /^Rev. Kwame Mensah Senior/ }).click();
@@ -263,6 +264,34 @@ ok('watermark size and position follow the sliders', Math.abs(wmBox.w - 256) < 3
 await shot(screen, 'live-watermark.png');
 await page.getByRole('group', { name: 'Watermark shows on' }).getByRole('button', { name: 'Stream only' }).click();
 await screen.waitForFunction(() => getComputedStyle(document.getElementById('wm')).opacity === '0', null, { timeout: 3000 }).then(() => ok('watermark can be kept to the stream only', true), () => ok('watermark can be kept to the stream only', false));
+// picture-in-picture box over the live video
+await tab('Media'); await page.getByText('clip', { exact: true }).click(); await page.getByRole('button', { name: 'In a box' }).click(); s = await live();
+ok('video in a box over the live picture', !!s.pip && s.pip.kind === 'video' && !!s.cam && s.kind !== 'media', s.kind);
+await screen.waitForFunction(() => { const v = document.querySelector('#pip video'); return v && v.currentTime > 0.2 && getComputedStyle(document.getElementById('pip')).opacity === '1'; }, null, { timeout: 8000 }).then(() => ok('box video plays', true), () => ok('box video plays', false));
+ok('verse/song bar still showing with the box', (await screen.evaluate(() => document.getElementById('lt').className)).includes('on'));
+ok('bars and tags stay above the box', await screen.evaluate(() => ['lt', 'ticker', 'nt'].every((id) => +getComputedStyle(document.getElementById(id)).zIndex > +getComputedStyle(document.getElementById('pip')).zIndex)));
+await tab('Live');
+const pipSec = page.locator('section', { hasText: 'Picture-in-picture box' });
+await pipSec.getByLabel('Size', { exact: true }).fill('40'); await pipSec.getByLabel('Across', { exact: true }).fill('10'); await pipSec.getByLabel('Down', { exact: true }).fill('20');
+await pipSec.getByLabel('Strength', { exact: true }).fill('0.5'); await pipSec.getByLabel('Volume', { exact: true }).fill('0.3');
+await screen.waitForTimeout(500);
+const pb = await screen.evaluate(() => { const r = document.getElementById('pip').getBoundingClientRect(); return { left: Math.round(r.left), top: Math.round(r.top), w: Math.round(r.width), op: getComputedStyle(document.getElementById('pip')).opacity, vol: document.querySelector('#pip video').volume }; });
+ok('box size, position, strength and volume follow the sliders', Math.abs(pb.w - 512) < 3 && Math.abs(pb.left - 128) < 3 && Math.abs(pb.top - 144) < 3 && pb.op === '0.5' && Math.abs(pb.vol - 0.3) < 0.01, JSON.stringify(pb));
+await pipSec.getByRole('button', { name: '↘' }).click(); await screen.waitForTimeout(400);
+const pb2 = await screen.evaluate(() => { const r = document.getElementById('pip').getBoundingClientRect(); return { right: Math.round(innerWidth - r.right), top: Math.round(r.top) }; });
+ok('corner preset', pb2.right < 1280 * 0.35 && pb2.top > 720 * 0.4, JSON.stringify(pb2));
+await page.getByLabel('Pause box video').click(); await screen.waitForTimeout(300);
+ok('pause the box video', await screen.evaluate(() => document.querySelector('#pip video').paused));
+await shot(screen, 'pip-video.png');
+// a document page in the box, with its own page turning
+await tab('Media'); await page.getByText('slides', { exact: true }).click(); await page.getByRole('button', { name: 'Show in a box over the screen' }).click();
+await screen.waitForFunction(() => document.querySelector('#pip img')?.naturalWidth > 0).then(() => ok('PDF page in the box', true), () => ok('PDF page in the box', false));
+await page.getByLabel('Box next page').click(); s = await live(); ok('box page turning', s.pip.src.endsWith('-p2'));
+ok('box on the OBS overlay too', await (async () => { const o = await ctx.newPage(); await o.goto(base + 'display.html?overlay'); await o.waitForTimeout(800); const v = await o.evaluate(() => getComputedStyle(document.getElementById('pip')).opacity !== '0'); await o.close(); return v; })());
+await page.getByLabel('Hide the box').click(); await screen.waitForTimeout(400);
+ok('hide the box', await screen.evaluate(() => getComputedStyle(document.getElementById('pip')).opacity === '0') && !(await live()).pip);
+await tab('Live');
+
 // overlay for OBS
 const ov = await ctx.newPage(); watch(ov, 'overlay'); await ov.setViewportSize({ width: 1280, height: 720 }); await ov.goto(base + 'display.html?overlay'); await ov.waitForTimeout(800);
 const ovs = await ov.evaluate(() => ({ cls: document.documentElement.className, bg: getComputedStyle(document.body).backgroundColor, cam: getComputedStyle(document.getElementById('cam')).display, lt: document.getElementById('lt').className, hint: document.getElementById('hint').hidden, cursor: document.body.className }));

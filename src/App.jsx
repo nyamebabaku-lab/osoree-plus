@@ -16,6 +16,7 @@ import PlanTab from './tabs/PlanTab.jsx';
 import ScreenTab from './tabs/ScreenTab.jsx';
 import LiveTab from './tabs/LiveTab.jsx';
 import CameraMode from './CameraMode.jsx';
+import { PipBar } from './tabs/PipControls.jsx';
 import { startWifiCamera } from './lib/wificam.js';
 
 const TABS = [['bible', 'Bible', BookOpen], ['songs', 'Songs', Music], ['media', 'Media', Image], ['live', 'Live', Radio], ['plan', 'Plan', ListOrdered], ['screen', 'Screen', Monitor]];
@@ -169,6 +170,7 @@ function LivePanel({ bible, versions }) {
             <button onClick={() => s.toggleName(p.id)} aria-label="Hide the name tag" className="rounded p-1 hover:bg-paper-300 dark:hover:bg-night-700"><X size={12} /></button>
           </div>
         ); })()}
+        <PipBar />
         {isVerse && live.refs.length > 1 && (
           <div className="flex flex-wrap gap-1.5">
             {live.refs.map((r, i) => (
@@ -194,6 +196,7 @@ function LivePanel({ bible, versions }) {
             <button onClick={s.restartVideo} aria-label="Play from the start" title="Play from the start" className="btn-soft min-h-9 px-3"><RotateCcw size={16} /></button>
             <Toggle on={video.loop} onClick={() => s.setVideo({ loop: !video.loop })} label="Repeat video"><Repeat size={16} /></Toggle>
             <Toggle on={!video.muted} onClick={() => s.setVideo({ muted: !video.muted })} label={video.muted ? 'Sound off' : 'Sound on'}>{video.muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</Toggle>
+            <input type="range" min="0" max="1" step="0.05" value={video.muted ? 0 : (video.volume ?? 1)} onChange={(e) => { const v = parseFloat(e.target.value); s.setVideo({ volume: v, muted: v === 0 }); }} aria-label="Video volume" className="min-w-[6rem] flex-1 accent-gold-500" />
           </div>
         ) : (
           <div className="flex items-center gap-2 text-sm">

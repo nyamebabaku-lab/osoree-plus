@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { FileText, Film, ImagePlus, Layers, ListPlus, MonitorPlay, Moon, Play, Trash2 } from 'lucide-react';
+import { FileText, Film, ImagePlus, Layers, ListPlus, MonitorPlay, Moon, PictureInPicture2, Play, Trash2 } from 'lucide-react';
 import { useStore } from '../store.js';
 import { addMediaFiles, formatName, formatSize, pickNativeMedia, removeMediaFile, useMediaUrl } from '../lib/media.js';
 import { IS_NATIVE } from '../lib/output.js';
@@ -31,7 +31,7 @@ function PageTile({ src, n, live, onClick }) {
 }
 
 function PdfSheet({ item, onClose }) {
-  const { goLive, addPlan, plan, live, mode, updateMedia, removeMedia } = useStore();
+  const { goLive, addPlan, plan, live, mode, updateMedia, removeMedia, showPip } = useStore();
   const inPlan = plan.some((p) => slideKey(p) === slideKey({ type: 'pdf', mediaId: item.id, page: 0 }));
   return (
     <Sheet title={item.name} onClose={onClose}>
@@ -42,6 +42,7 @@ function PdfSheet({ item, onClose }) {
             <PageTile key={src} src={src} n={i + 1} live={mode === 'show' && live?.type === 'pdf' && live.mediaId === item.id && (live.page || 0) === i} onClick={() => goLive({ type: 'pdf', mediaId: item.id, page: i })} />
           ))}
         </div>
+        <button onClick={() => { showPip(item.id, 0); onClose(); }} className="btn-soft w-full"><PictureInPicture2 size={18} /> Show in a box over the screen</button>
         <div className="grid grid-cols-2 gap-2">
           <button onClick={() => addPlan({ type: 'pdf', mediaId: item.id, page: 0 })} disabled={inPlan} className="btn-soft"><ListPlus size={16} /> {inPlan ? 'In plan' : 'Add to plan'}</button>
           <button onClick={() => { if (window.confirm(`Remove "${item.name}"?`)) { removeMediaFile(item); removeMedia(item.id); onClose(); } }} className="btn-soft text-red-600 dark:text-red-400"><Trash2 size={16} /> Remove</button>
@@ -61,14 +62,17 @@ function MediaSheet({ item, onClose }) {
 }
 
 function PictureSheet({ item, onClose }) {
-  const { goLive, addPlan, plan, idleId, setIdle, style, setStyle, updateMedia, removeMedia } = useStore();
+  const { goLive, addPlan, plan, idleId, setIdle, style, setStyle, updateMedia, removeMedia, showPip } = useStore();
   const inPlan = plan.some((p) => slideKey(p) === slideKey({ type: 'media', mediaId: item.id }));
   const isIdle = idleId === item.id, isBg = style.bgId === item.id;
   return (
     <Sheet title={item.name} onClose={onClose}>
       <div className="space-y-3">
         <Thumb item={item} className="aspect-video rounded-xl" />
-        <button onClick={() => { goLive({ type: 'media', mediaId: item.id }); onClose(); }} className="btn-gold w-full"><Play size={18} /> Show on screen</button>
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={() => { goLive({ type: 'media', mediaId: item.id }); onClose(); }} className="btn-gold"><Play size={18} /> Show on screen</button>
+          <button onClick={() => { showPip(item.id); onClose(); }} className="btn-soft"><PictureInPicture2 size={18} /> In a box</button>
+        </div>
         <div className="grid grid-cols-2 gap-2">
           <button onClick={() => setIdle(isIdle ? '' : item.id)} aria-pressed={isIdle} className={isIdle ? 'btn bg-gold-400/20 ring-1 ring-gold-500' : 'btn-soft'}><Moon size={16} /> {isIdle ? 'Idle screen ✓' : 'Use as idle screen'}</button>
           <button onClick={() => setStyle({ bgId: isBg ? '' : item.id })} aria-pressed={isBg} className={isBg ? 'btn bg-gold-400/20 ring-1 ring-gold-500' : 'btn-soft'}><Layers size={16} /> {isBg ? 'Text background ✓' : 'Behind verses & songs'}</button>

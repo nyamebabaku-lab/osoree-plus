@@ -35,7 +35,7 @@
   #cam video { width: 100%; height: 100%; object-fit: cover; }
   #cam.mirror video { transform: scaleX(-1); }
   #camnote { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font: 600 2.4vmin system-ui, sans-serif; color: #fff; opacity: .75; text-align: center; }
-  #lt { position: fixed; left: 4vw; right: 4vw; bottom: 5vh; opacity: 0; transform: translateY(1.5vh); transition: opacity .25s, transform .25s; pointer-events: none; }
+  #lt { position: fixed; z-index: 4; left: 4vw; right: 4vw; bottom: 5vh; opacity: 0; transform: translateY(1.5vh); transition: opacity .25s, transform .25s; pointer-events: none; }
   #lt.on { opacity: 1; transform: none; }
   #lt.with-ticker { bottom: calc(5vh + 6.2vh); }
   /* name tag: its own layer over whatever is showing; position and size come from the operator */
@@ -47,6 +47,9 @@
   #nttext { position: relative; }
   #ntname { margin: 0; font-weight: 800; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #nttitle { margin: .12em 0 0; font-size: .62em; font-weight: 600; opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* picture-in-picture */
+  #pip { position: fixed; z-index: 3; box-sizing: border-box; opacity: 0; transition: opacity .3s; pointer-events: none; overflow: hidden; background: #000; }
+  #pip img, #pip video { display: block; width: 100%; height: auto; }
   /* church logo watermark */
   #wm { position: fixed; z-index: 5; opacity: 0; transition: opacity .3s; pointer-events: none; }
   #wm img { display: block; width: 100%; height: auto; }
@@ -57,7 +60,7 @@
   #lttext .lref { font-size: .62em; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; margin-bottom: .2em; }
   #lttext .lmain { margin: 0; line-height: 1.22; font-weight: 600; overflow-wrap: break-word; }
   #lttext .lsub { margin: .15em 0 0; font-size: .62em; font-weight: 600; opacity: .9; }
-  #ticker { position: fixed; left: 0; right: 0; bottom: 0; height: 6.2vh; overflow: hidden; display: none; align-items: center; }
+  #ticker { position: fixed; z-index: 4; left: 0; right: 0; bottom: 0; height: 6.2vh; overflow: hidden; display: none; align-items: center; }
   #ticker.on { display: flex; }
   #tickerbg { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
   #tickertext { position: relative; white-space: nowrap; font: 700 3.4vh system-ui, 'Noto Sans', sans-serif; padding-left: 100vw; animation: tick linear infinite; }
@@ -72,6 +75,7 @@
 <div id="media" class="layer"></div>
 <div id="dim" class="layer"></div>
 <div id="stage" class="layer"><div id="wrap"></div></div>
+<div id="pip"></div>
 <div id="lt"><div id="ltbox"><div id="ltbg"></div><div id="ltbar"></div><div id="lttext"></div></div></div>
 <div id="ticker"><div id="tickerbg"></div><div id="tickertext"></div></div>
 <div id="wm"><img alt=""></div>
@@ -144,6 +148,7 @@
     video = video || {};
     el.loop = live ? !!video.loop : true;
     el.muted = PREVIEW || !live || !!video.muted || needsSound;
+    if (live) el.volume = Math.max(0, Math.min(1, video.volume == null ? 1 : video.volume));
     if (live && video.seq !== videoSeq) { if (videoSeq !== null) el.currentTime = 0; videoSeq = video.seq; }
     if (live && video.playing === false) { el.pause(); return; }
     if (!el.paused) return;
@@ -314,6 +319,43 @@
     wm.style.opacity = w.opacity == null ? 0.85 : w.opacity;
   }
 
+  // Picture-in-picture: the operator's box over everything except the bars and tags.
+  var pipBox = $('pip'), pipKey = '', pipEl = null, pipSeq = null;
+  function showPip(s) {
+    var p = s.kind !== 'black' && s.pip;
+    if (!p) {
+      pipBox.style.opacity = 0;
+      if (pipEl && pipEl.pause) pipEl.pause();
+      pipKey = '';
+      return;
+    }
+    var key = p.kind + '|' + p.src;
+    if (key !== pipKey) {
+      pipKey = key; pipSeq = null;
+      if (pipEl) { if (pipEl.pause) pipEl.pause(); pipEl.remove(); }
+      var el = document.createElement(p.kind === 'video' ? 'video' : 'img');
+      if (p.kind === 'video') { el.playsInline = true; el.setAttribute('playsinline', ''); el.preload = 'auto'; }
+      pipEl = el; pipBox.appendChild(el);
+      resolve(p.src, function (url) { if (pipEl === el) { el.src = url; if (el.play) controlPip(el, p); } });
+    }
+    pipBox.style.left = (p.x == null ? 66 : p.x) + 'vw';
+    pipBox.style.top = (p.y == null ? 6 : p.y) + 'vh';
+    pipBox.style.width = (p.w || 30) + 'vw';
+    pipBox.style.borderRadius = (p.radius || 0) + 'vmin';
+    pipBox.style.border = p.border ? '0.35vmin solid ' + ((s.lt && s.lt.accent) || '#e2b232') : 'none';
+    pipBox.style.boxShadow = p.shadow ? '0 1vmin 4vmin rgba(0,0,0,.55)' : 'none';
+    pipBox.style.opacity = p.opacity == null ? 1 : p.opacity;
+    if (pipEl && pipEl.play && pipEl.src) controlPip(pipEl, p);
+  }
+  function controlPip(el, p) {
+    el.loop = !!p.loop;
+    el.muted = PREVIEW || !!p.muted;
+    el.volume = Math.max(0, Math.min(1, p.volume == null ? 1 : p.volume));
+    if (p.seq !== pipSeq) { if (pipSeq !== null) el.currentTime = 0; pipSeq = p.seq; }
+    if (p.playing === false) { el.pause(); return; }
+    if (el.paused) { var r = el.play(); if (r && r.catch) r.catch(function () { el.muted = true; el.play().catch(function () {}); }); }
+  }
+
   // Name tag: where the operator put it, kept above the verse bar and the ticker when those are showing.
   var nt = $('nt');
   function showNameTag(s) {
@@ -441,11 +483,13 @@
       dim.style.opacity = 0;
       wrap.style.opacity = 0;
       if (hasText) showLower(s); else lt.className = '';
+      showPip(s);
       showNameTag(s);
       return;
     }
     showCam(null);
     lt.className = '';
+    showPip(s);
     showNameTag(s);
     stage.style.paddingBottom = s.ticker ? 'calc(6vmin + 6.2vh)' : '';
     bg.style.background = s.kind === 'black' ? '#000' : (st.bg || '#000');
