@@ -9,8 +9,10 @@ API=https://api.supabase.com/v1/projects/$REF
 H=(-H "Authorization: Bearer $TOKEN")
 
 echo "1/3 Database tables"
-python3 -c 'import json,sys; print(json.dumps({"query": open("supabase/migrations/0001_osoree.sql").read()}))' \
-  | curl -sf "${H[@]}" -H 'Content-Type: application/json' -X POST "$API/database/query" --data @- >/dev/null
+for f in supabase/migrations/*.sql; do
+  python3 -c 'import json,sys; print(json.dumps({"query": open(sys.argv[1]).read(), "read_only": False}))' "$f" \
+    | curl -sf "${H[@]}" -H 'Content-Type: application/json' -X POST "$API/database/query" --data @- >/dev/null
+done
 
 echo "2/3 Secrets"
 KEY=$(cat ../osoree-plus-signing/licence-private.key)

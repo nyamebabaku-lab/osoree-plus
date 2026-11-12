@@ -15,7 +15,7 @@ const SERVER = 'https://inoxsalemgwgrzftamxs.supabase.co/functions/v1/osoree';
 // the server, signing with the real licence key (the app only trusts that key)
 const priv = Buffer.from(fs.readFileSync(path.resolve(root, '../osoree-plus-signing/licence-private.key'), 'utf8').trim(), 'base64url');
 const pg = new PGlite();
-await pg.exec(fs.readFileSync(path.join(root, 'supabase/migrations/0001_osoree.sql'), 'utf8'));
+for (const f of fs.readdirSync(path.join(root, 'supabase/migrations')).sort()) await pg.exec(fs.readFileSync(path.join(root, 'supabase/migrations', f), 'utf8'));
 const sms = [];
 const envs = { FN_URL: SERVER, MNOTIFY_KEY: 'k', SUPER_ADMIN_EMAIL: 'boss@example.com' };
 const d = {

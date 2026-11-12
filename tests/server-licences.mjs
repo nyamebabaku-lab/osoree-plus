@@ -11,7 +11,7 @@ ed.hashes.sha512 = sha512;
 let pass = 0, fail = 0;
 const ok = (n, c, x = '') => { c ? pass++ : fail++; console.log(c ? 'PASS' : 'FAIL', n, x); };
 const pg = new PGlite();
-await pg.exec(fs.readFileSync('supabase/migrations/0001_osoree.sql', 'utf8'));
+for (const f of fs.readdirSync('supabase/migrations').sort()) await pg.exec(fs.readFileSync(`supabase/migrations/${f}`, 'utf8'));
 const priv = ed.utils.randomSecretKey(), pub = ed.getPublicKey(priv);
 const b64u = (b) => Buffer.from(b).toString('base64url');
 let clock = new Date('2026-11-12T10:00:00Z');
@@ -111,6 +111,7 @@ ok('restore without SMS set up explains', /not set up/.test((await call('restore
 envs.MNOTIFY_KEY = 'mn';
 fakeProvider.fn = (u) => (u.includes('mnotify') ? { json: { status: 'error', code: '4005', message: 'Insufficient balance' } } : {});
 ok('SMS refused by mNotify is reported', /could not be sent/.test((await call('restore-start', { phone: '0240000002' })).error));
+ok('mNotify reply kept for the Super Admin', (await d.query('select reply from sms_log where not ok'))[0]?.reply.includes('Insufficient balance'));
 fakeProvider.fn = (u) => (u.includes('mnotify') ? { json: { status: 'success', code: '2000' } } : {});
 ok('restore for an unknown number', (await call('restore-start', { phone: '0209999999' })).status === 404);
 await call('restore-start', { phone: '024 000 0002' });

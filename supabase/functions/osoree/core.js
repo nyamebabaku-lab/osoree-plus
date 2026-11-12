@@ -213,7 +213,9 @@ async function restoreStart(d, { phone }) {
   });
   // mNotify answers 200 even when it refuses (no credit, sender ID not approved): read its status.
   const j = await r.json().catch(() => ({}));
-  if (!r.ok || (j.status && j.status !== 'success') || (j.code && String(j.code) !== '2000')) {
+  const sentOk = r.ok && (!j.status || j.status === 'success') && (!j.code || String(j.code) === '2000');
+  await d.query('insert into sms_log (phone, ok, reply) values ($1, $2, $3)', [ph, sentOk, `${r.status || ''} ${JSON.stringify(j).slice(0, 500)}`]).catch(() => {});
+  if (!sentOk) {
     await d.query('delete from restore_codes where phone = $1', [ph]);
     throw new Fail('The SMS could not be sent. Try again later, or contact your dealer.', 502);
   }
