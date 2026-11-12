@@ -6,3 +6,5 @@ bibles-import/
 tests/out/
 release/
 publish.sh
+dist-admin-app
+admin-app/android/app/build

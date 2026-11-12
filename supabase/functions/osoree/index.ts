@@ -16,7 +16,8 @@ const b64u = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, '
 const fromB64u = (s: string) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
-const page = (title: string, text: string, extra = '') => new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><body style="font:18px system-ui,sans-serif;max-width:30rem;margin:12vh auto;padding:0 1rem;text-align:center;background:#0e0f13;color:#f5f5f4"><h1 style="color:#e2b232">${title}</h1><p>${text}</p>${extra}</body>`, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+
+const text = (t: string) => new Response(t + '\n', { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
 
 const hex = (b: ArrayBuffer) => Array.from(new Uint8Array(b), (x) => x.toString(16).padStart(2, '0')).join('');
 const deps = {
@@ -46,11 +47,19 @@ Deno.serve(async (req) => {
   const url = new URL(req.url);
   const route = url.pathname.replace(/^.*?\/osoree\/?/, '').replace(/\/$/, '');
   try {
-    if (route === 'done') return page('Thank you', 'You can go back to Ɔsɔreɛ Plus now. Pro switches on by itself in a few seconds.');
+    if (route === 'done') return text('Thank you.\n\nGo back to Ɔsɔreɛ Plus now. Pro switches on by itself in a few seconds.');
+    // Supabase shows functions' web pages as plain text, so this page is written as text.
+    if (route === 'about' || route === '') return new Response(`Ɔsɔreɛ Plus
+Church projection app for Ghana: Bible verses, songs, pictures and videos from a phone to any screen, with or without internet.
+
+SMS one-time codes (OTP)
+When a church moves its Ɔsɔreɛ Plus Pro licence to a new phone, we send a one-time code by SMS (sender ID OsoreePlus) to the phone number given when the licence was bought. The code is typed into the app to confirm the move. It is valid for 10 minutes and works only once. We never ask for the code by phone call.
+`, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+    if (route === 'confirmed') return text('E-mail confirmed.\n\nGo back to Ɔsɔreɛ Admin and sign in with your e-mail and password.');
     if (route === 'test-pay') {
-      if (req.method === 'GET') return page('Test payment', 'Test mode: no money is taken.', `<form method="post"><button style="font:inherit;padding:.8em 1.6em;border-radius:12px;border:0;background:#e2b232;font-weight:700">Pay (test)</button></form>`);
+      // Test mode only (the server refuses otherwise): opening the link counts as paying.
       await handle(deps, 'test-pay', { ref: url.searchParams.get('ref') });
-      return page('Paid (test)', 'You can go back to Ɔsɔreɛ Plus now.');
+      return text('Paid (test mode: no money was taken).\n\nGo back to Ɔsɔreɛ Plus now: Pro switches on by itself.');
     }
     if (route === 'webhook') {
       const raw = await req.text();

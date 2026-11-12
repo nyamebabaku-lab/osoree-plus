@@ -7,14 +7,17 @@ const VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.ur
 
 // VITE_TARGET=app builds for the phone apps: no service worker, every file ships inside the app.
 const APP = process.env.VITE_TARGET === 'app';
+// VITE_APP=admin builds the Super Admin app instead: to dist/admin (web) or dist-admin-app (phone).
+const ADMIN = process.env.VITE_APP === 'admin';
 
 export default defineConfig({
   base: './',
+  publicDir: ADMIN ? false : 'public', // the admin app needs no Bibles, fonts or projector page
   define: { __APP_VERSION__: JSON.stringify(VERSION) },
   plugins: [
     react(),
     VitePWA({
-      disable: APP,
+      disable: APP || ADMIN,
       registerType: 'autoUpdate',
       includeAssets: ['icon.svg', 'display.html', 'fonts/*'],
       manifest: {
@@ -38,5 +41,5 @@ export default defineConfig({
       },
     }),
   ],
-  build: { outDir: APP ? 'dist-app' : 'dist', chunkSizeWarningLimit: 1500 },
+  build: { outDir: ADMIN ? (APP ? 'dist-admin-app' : 'dist/admin') : APP ? 'dist-app' : 'dist', chunkSizeWarningLimit: 1500 },
 });

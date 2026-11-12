@@ -1,0 +1,11 @@
+{
+  "name": "osoree-admin-app",
+  "private": true,
+  "description": "Android shell for the Ɔsɔreɛ Admin app; the code lives in ../src/admin and builds to ../dist-admin-app",
+  "dependencies": {
+    "@capacitor/android": "file:../node_modules/@capacitor/android",
+    "@capacitor/core": "file:../node_modules/@capacitor/core",
+    "@capacitor/splash-screen": "file:../node_modules/@capacitor/splash-screen",
+    "@capacitor/status-bar": "file:../node_modules/@capacitor/status-bar"
+  }
+}

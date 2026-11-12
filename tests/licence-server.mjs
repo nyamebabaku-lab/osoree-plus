@@ -27,7 +27,7 @@ const d = {
   random: (n) => Array.from(crypto.randomBytes(n), (x) => ALPHABET[x % 32]).join(''),
   sha256: async (t) => crypto.createHash('sha256').update(t).digest('hex'),
 };
-const boss = { id: '00000000-0000-0000-0000-00000000000b', email: 'boss@example.com' };
+const boss = { id: '00000000-0000-0000-0000-00000000000b', email: 'boss@example.com', email_confirmed_at: '2026-11-12T10:00:00Z' };
 await handle(d, 'admin/claim', {}, { user: boss });
 const admin = (route, body) => handle(d, `admin/${route}`, body, { user: boss });
 

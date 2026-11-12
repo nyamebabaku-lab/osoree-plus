@@ -30,7 +30,7 @@ const d = {
 const call = async (route, body, extra) => { try { return await handle(d, route, body, extra); } catch (e) { return { error: e.message, status: e.status }; } };
 const readLic = (t) => { const [, body, sig] = t.split('.'); return { ok: ed.verify(Buffer.from(sig, 'base64url'), new TextEncoder().encode(body), pub), p: JSON.parse(Buffer.from(body, 'base64url')) }; };
 const A = 'OSR-2345-6789-ABCD', B = 'OSR-BCDE-FGHJ-KLMN', C = 'OSR-PQRS-TUVW-XYZ2';
-const admin = { id: '00000000-0000-0000-0000-000000000001', email: 'Boss@Example.com' };
+const admin = { id: '00000000-0000-0000-0000-000000000001', email: 'Boss@Example.com', email_confirmed_at: '2026-11-12T10:00:00Z' };
 const stranger = { id: '00000000-0000-0000-0000-000000000002', email: 'x@example.com' };
 
 // ---- app basics
@@ -87,6 +87,7 @@ ok('test page refuses when test mode is off', (await call('test-pay', { ref: b4.
 // ---- admin
 ok('admin routes refuse strangers', (await call('admin/settings', {}, { user: stranger })).status === 403);
 ok('claim refused for another e-mail', (await call('admin/claim', {}, { user: stranger })).status === 403);
+ok('claim refused before the e-mail is confirmed', /Confirm this e-mail/.test((await call('admin/claim', {}, { user: { ...admin, email_confirmed_at: null } })).error));
 ok('Super Admin claims the server', (await call('admin/claim', {}, { user: admin })).first === true);
 ok('nobody else can claim it afterwards', (await call('admin/claim', {}, { user: { ...stranger, email: 'boss@example.com' } })).status === 403);
 const st = await call('admin/saveSettings', { trialDays: 14, prices: { pro: 400 }, testMode: true, dealer: 'Call 024 000 0000' }, { user: admin });

@@ -272,6 +272,7 @@ const ADMIN = {
     const [{ n }] = await d.query('select count(*)::int n from admins');
     if (n > 0) { need(await isAdmin(d, user), 'This account is not the Super Admin.', 403); return { ok: true }; }
     need(String(user.email || '').toLowerCase() === d.env('SUPER_ADMIN_EMAIL').toLowerCase(), 'Only the Super Admin e-mail can set up this server.', 403);
+    need(user.email_confirmed_at, 'Confirm this e-mail address first: tap the link in the e-mail.', 403);
     await d.query('insert into admins (user_id, email) values ($1, $2)', [user.id, user.email]);
     return { ok: true, first: true };
   },
@@ -317,7 +318,7 @@ const ADMIN = {
   async createCodes(d, b) {
     need(PRODUCTS[b.product], 'Choose a product.');
     const count = Math.min(200, Math.max(1, b.count || 1)), uses = Math.min(1000, Math.max(1, b.uses || 1));
-    const prefix = String(b.prefix || 'OSP').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || 'OSP';
+    const prefix = String(b.prefix || 'OSP').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12) || 'OSP';
     const out = [];
     for (let i = 0; i < count; i++) {
       const code = `${prefix}-${d.random(4)}-${d.random(4)}`;
@@ -327,6 +328,13 @@ const ADMIN = {
     return { codes: out };
   },
   async codes(d) { return d.query('select * from activation_codes order by created_at desc limit 300'); },
+  async smsLog(d) { return d.query('select phone, ok, reply, created_at from sms_log order by id desc limit 50'); },
+  async recent(d) {
+    return {
+      payments: await d.query("select id, device_code, product, amount, currency, phone, church, provider, status, created_at, paid_at from payments order by created_at desc limit 20"),
+      smsProblems: await d.query('select phone, reply, created_at from sms_log where not ok order by id desc limit 5'),
+    };
+  },
 };
 
 /** One entry point: route, body, the signed-in user (admin routes) and the raw request bits (webhooks). */
