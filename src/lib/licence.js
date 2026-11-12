@@ -66,12 +66,18 @@ export function licenceStatus({ licence, trialStart, lastSeen }, deviceCode, pol
   let problem = '';
   if (licence) {
     const r = checkLicence(licence, deviceCode, now);
-    if (r.ok) return { state: 'pro', expires: r.payload.e || 0, church: r.payload.c || '', daysLeft: r.payload.e ? Math.ceil((r.payload.e - now) / DAY) : null };
+    if (r.ok) return { state: 'pro', expires: r.payload.e || 0, church: r.payload.c || '', daysLeft: r.payload.e ? Math.ceil((r.payload.e - now) / DAY) : null, pro: policy.pro };
     problem = r.reason;
   }
   const end = (trialStart || now) + policy.trialDays * DAY;
-  if (now < end) return { state: 'trial', daysLeft: Math.ceil((end - now) / DAY), problem };
-  return { state: 'free', daysLeft: 0, problem };
+  if (now < end) return { state: 'trial', daysLeft: Math.ceil((end - now) / DAY), problem, pro: policy.pro };
+  return { state: 'free', daysLeft: 0, problem, pro: policy.pro };
 }
 
-export const isUnlocked = (status, feature, policy = DEFAULT_POLICY) => !policy.pro.includes(feature) || status.state === 'pro' || status.state === 'trial';
+// The Super Admin's choice of Pro features travels with the status (from the server, or the default).
+export const isUnlocked = (status, feature) => !(status.pro || DEFAULT_POLICY.pro).includes(feature) || status.state === 'pro' || status.state === 'trial';
+
+/** The licence's own id ("n"), so the server can say if it was revoked or moved to another phone. */
+export function licenceId(token) {
+  try { return JSON.parse(new TextDecoder().decode(b64u(String(token).split('.')[1]))).n || ''; } catch { return ''; }
+}

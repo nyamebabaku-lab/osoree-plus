@@ -67,6 +67,8 @@ export const useStore = create(persist((set, get) => {
   trialStart: 0, // seconds; set the first time the app opens
   lastSeen: 0, // latest time the app has seen (a clock wound back cannot stretch the trial)
   deviceCode: '', licStatus: null, paywall: '', // worked out each time; not saved
+  policy: null, // from the server: trial length, Pro features, prices, provider, dealer (kept for offline use)
+  pendingPay: '', // a payment the app is waiting for (reference)
   camAddress: '', // camera mode: the main phone's address
   camStatus: null, // this phone's camera while live video is on: { state, screens } or { error }
 

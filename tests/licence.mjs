@@ -8,6 +8,8 @@ const issue = (...a) => execFileSync('node', ['scripts/licence.mjs', 'issue', ..
 const base = 'http://127.0.0.1:4871/';
 const b = await chromium.launch({ executablePath: process.env.HOME + '/.cache/ms-playwright/chromium-1148/chrome-linux/chrome' });
 const ctx = await b.newContext({ viewport: { width: 400, height: 860 }, serviceWorkers: 'block' });
+// No licence server in these tests: the phone is offline as far as the server is concerned.
+await ctx.route('https://inoxsalemgwgrzftamxs.supabase.co/**', (r) => r.abort('internetdisconnected'));
 const page = await ctx.newPage();
 const errs = []; page.on('pageerror', (e) => errs.push(e.message));
 let pass = 0, fail = 0; const ok = (n, c, x = '') => { c ? pass++ : fail++; console.log(c ? 'PASS' : 'FAIL', n, x); };
@@ -44,6 +46,7 @@ await tab('Screen'); await page.getByRole('button', { name: /Back up/ }).click()
 // licences
 const tryLicence = async (text) => {
   await tab('Screen'); await page.getByRole('button', { name: 'Get Pro or enter a licence' }).click();
+  await page.getByText('Got a licence code from your dealer?').click();
   await page.getByLabel('Licence code').fill(text); await page.getByRole('button', { name: 'Activate Pro' }).click(); await page.waitForTimeout(300);
   const err = await page.locator('[role=alert]').innerText().catch(() => '');
   if (await page.locator('role=dialog').isVisible()) await page.getByLabel('Close').click();
@@ -70,7 +73,7 @@ await setState({ licence: yearly }); await page.reload(); await page.waitForSele
 ok('yearly licence shows days left', await page.getByText(/Pro is active, until .* \((36[45]|366) days\)/).isVisible());
 
 // winding the clock back does not stretch the trial
-const fresh = await b.newContext({ viewport: { width: 400, height: 860 }, serviceWorkers: 'block' }); const p2 = await fresh.newPage();
+const fresh = await b.newContext({ viewport: { width: 400, height: 860 }, serviceWorkers: 'block' }); await fresh.route('https://inoxsalemgwgrzftamxs.supabase.co/**', (r) => r.abort('internetdisconnected')); const p2 = await fresh.newPage();
 await p2.goto(base); await p2.waitForSelector('nav');
 await p2.evaluate((t) => { const d = JSON.parse(localStorage.getItem('osoree-plus')); d.state.trialStart = t - 20 * 86400; d.state.lastSeen = t + 15 * 86400; localStorage.setItem('osoree-plus', JSON.stringify(d)); }, now());
 await p2.reload(); await p2.waitForSelector('nav');

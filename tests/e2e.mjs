@@ -9,11 +9,13 @@ const base = 'http://127.0.0.1:4871/';
 
 const b = await chromium.launch({ executablePath: process.env.HOME + '/.cache/ms-playwright/chromium-1148/chrome-linux/chrome', args: ['--autoplay-policy=no-user-gesture-required', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
 const ctx = await b.newContext({ viewport: { width: 400, height: 860 }, deviceScaleFactor: 2, serviceWorkers: 'block', acceptDownloads: true });
+// No licence server in these tests: the phone is offline as far as the server is concerned.
+await ctx.route('https://inoxsalemgwgrzftamxs.supabase.co/**', (r) => r.abort('internetdisconnected'));
 const page = await ctx.newPage();
 const errs = [];
 const watch = (p, tag) => {
   p.on('pageerror', (e) => errs.push(tag + ': ' + e.message));
-  p.on('console', (m) => m.type() === 'error' && errs.push(tag + ': ' + m.text()));
+  p.on('console', (m) => m.type() === 'error' && !(m.location()?.url || '').includes('supabase.co') && !/ERR_INTERNET_DISCONNECTED/.test(m.text()) && errs.push(tag + ': ' + m.text()));
   p.on('response', (r) => { if (r.status() >= 400) errs.push(tag + ' ' + r.status() + ' ' + r.url()); });
 };
 watch(page, 'op');
@@ -199,7 +201,7 @@ await page.getByRole('button', { name: 'Reset' }).click();
 const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Back up' }).click()]);
 const backupPath = out('backup.json'); await dl.saveAs(backupPath);
 const bk = JSON.parse(fs.readFileSync(backupPath, 'utf8')); ok('backup has Bibles and songs', bk.bibles.length === 5 && bk.songs.some((x) => x.title === 'Yesu Ne Me Hwɛfoɔ'), `${bk.bibles.length} bibles, ${bk.songs.length} songs`);
-const fresh = await b.newContext({ viewport: { width: 400, height: 860 }, serviceWorkers: 'block' }); const p2 = await fresh.newPage(); watch(p2, 'fresh');
+const fresh = await b.newContext({ viewport: { width: 400, height: 860 }, serviceWorkers: 'block' }); await fresh.route('https://inoxsalemgwgrzftamxs.supabase.co/**', (r) => r.abort('internetdisconnected')); const p2 = await fresh.newPage(); watch(p2, 'fresh');
 await p2.goto(base); await p2.waitForSelector('nav'); await p2.locator('nav button', { hasText: 'Screen' }).click();
 await p2.setInputFiles('input[type=file][accept^=".json"]', backupPath); await p2.waitForSelector('text=/Restored 5 Bibles/');
 ok('restore on another device', await p2.getByLabel('Bible version').locator('option', { hasText: 'Test Twi Bible' }).count() === 1);

@@ -128,6 +128,21 @@ public class ScreenPlugin extends Plugin implements DisplayManager.DisplayListen
         call.resolve(r);
     }
 
+    /** Opens a web page in the phone's browser (payment checkout). */
+    @PluginMethod
+    public void openUrl(PluginCall call) {
+        String url = call.getString("url", "");
+        if (!url.startsWith("https://")) { call.reject("Bad address."); return; }
+        try {
+            Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("No web browser was found on this phone.");
+        }
+    }
+
     /** This phone's Android ID: the same after reinstalling the app, new only after a factory reset. Used for licences. */
     @PluginMethod
     public void getDeviceId(PluginCall call) {

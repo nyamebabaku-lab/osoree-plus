@@ -1,12 +1,33 @@
 import { useEffect, useState } from 'react';
-import { Check, Copy, KeyRound, Lock } from 'lucide-react';
+import { Check, Copy, CreditCard, KeyRound, Lock, Phone, Ticket } from 'lucide-react';
 import { useStore } from './store.js';
-import { DEFAULT_POLICY, FEATURES, checkLicence, getDeviceCode, isUnlocked, licenceStatus } from './lib/licence.js';
+import { DEFAULT_POLICY, FEATURES, checkLicence, getDeviceCode, isUnlocked, licenceId, licenceStatus } from './lib/licence.js';
+import { api, openCheckout } from './lib/server.js';
+import { IS_NATIVE } from './lib/output.js';
 import { Sheet } from './ui.jsx';
 
-// Works out the device code, starts the trial on first use, and keeps the Pro status up to date.
+const policyOf = (st) => ({ ...DEFAULT_POLICY, ...(st.policy ? { trialDays: st.policy.trialDays ?? DEFAULT_POLICY.trialDays, pro: st.policy.pro || DEFAULT_POLICY.pro } : {}) });
+
+function recompute(set) {
+  const st = useStore.getState();
+  if (!st.deviceCode) return;
+  set({ licStatus: licenceStatus({ licence: st.licence, trialStart: st.trialStart, lastSeen: st.lastSeen }, st.deviceCode, policyOf(st)) });
+}
+
+/** Waits for a payment to go through, then saves the licence. Returns true when paid. */
+export async function checkPayment(ref) {
+  const r = await api('buy-status', { ref });
+  const { setLicState, setLicence } = useStore.getState();
+  if (r.status === 'paid' && r.licence) { setLicence(r.licence); setLicState({ pendingPay: '' }); return true; }
+  if (r.status === 'failed') { setLicState({ pendingPay: '' }); throw new Error(r.error ? `The payment did not go through (${r.error}).` : 'The payment did not go through.'); }
+  return false;
+}
+
+// Works out the device code, starts the trial on first use, keeps the Pro status up to date, and (when there is
+// internet) checks in with the server: the trial's real start, prices and Pro features, revoked or moved licences.
 export function useLicenceBoot() {
   const licence = useStore((s) => s.licence);
+  const policy = useStore((s) => s.policy);
   const setLicState = useStore((s) => s.setLicState);
   useEffect(() => {
     let on = true;
@@ -14,19 +35,37 @@ export function useLicenceBoot() {
       const deviceCode = await getDeviceCode();
       const st = useStore.getState();
       const now = Math.floor(Date.now() / 1000);
-      const trialStart = st.trialStart || now;
-      const lastSeen = Math.max(st.lastSeen || 0, now);
-      const licStatus = licenceStatus({ licence: st.licence, trialStart, lastSeen }, deviceCode, DEFAULT_POLICY);
-      if (on) setLicState({ deviceCode, trialStart, lastSeen, licStatus });
+      if (!on) return;
+      setLicState({ deviceCode, trialStart: st.trialStart || now, lastSeen: Math.max(st.lastSeen || 0, now) });
+      recompute(setLicState);
     };
-    refresh();
-    const t = setInterval(refresh, 5 * 60 * 1000);
-    return () => { on = false; clearInterval(t); };
-  }, [licence, setLicState]);
+    const sync = async () => {
+      const deviceCode = await getDeviceCode();
+      const st = useStore.getState();
+      try {
+        const id = st.licence ? licenceId(st.licence) : '';
+        const r = await api('hello', { device: deviceCode, platform: IS_NATIVE ? 'android' : 'web', version: __APP_VERSION__, licenceIds: id ? [id] : [] });
+        if (!on) return;
+        const patch = { policy: r.config, trialStart: Math.min(st.trialStart || r.trialStart, r.trialStart) };
+        let lic = st.licence;
+        if (id && r.revoked?.includes(id)) lic = ''; // revoked, or moved to another phone
+        const mine = lic && checkLicence(lic, deviceCode, Math.floor(Date.now() / 1000)).ok;
+        if (!mine && r.licence) lic = r.licence; // e.g. after reinstalling the app
+        if (lic !== st.licence) patch.licence = lic;
+        setLicState(patch);
+        if (st.pendingPay) await checkPayment(st.pendingPay).catch(() => {});
+      } catch { /* offline: the saved status stands */ }
+    };
+    refresh().then(sync);
+    const t = setInterval(() => refresh(), 5 * 60 * 1000);
+    const s = setInterval(sync, 6 * 60 * 60 * 1000);
+    return () => { on = false; clearInterval(t); clearInterval(s); };
+  }, [setLicState]);
+  useEffect(() => { recompute(setLicState); }, [licence, policy, setLicState]);
 }
 
 // Features locked on this device right now (none until the status is known).
-export const lockedFeatures = (status) => (status ? DEFAULT_POLICY.pro.filter((f) => !isUnlocked(status, f)) : []);
+export const lockedFeatures = (status) => (status ? (status.pro || DEFAULT_POLICY.pro).filter((f) => !isUnlocked(status, f)) : []);
 
 /** Returns a check: gate('stream') is true when allowed; otherwise it opens the Pro sheet and is false. */
 export function useGate() {
@@ -90,6 +129,101 @@ function LicenceEntry({ onDone }) {
   );
 }
 
+const money = (cur, n) => `${cur === 'GHS' ? 'GH₵' : cur + ' '}${Number(n).toLocaleString()}`;
+
+function BuySection() {
+  const { policy, deviceCode, pendingPay, setLicState } = useStore();
+  const [product, setProduct] = useState('pro');
+  const [phone, setPhone] = useState('');
+  const [church, setChurch] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const prices = policy?.prices;
+  useEffect(() => {
+    if (!pendingPay) return undefined;
+    let tries = 0;
+    const t = setInterval(() => {
+      if (++tries > 300) { clearInterval(t); return; } // about 15 minutes
+      checkPayment(pendingPay).then((paid) => paid && clearInterval(t)).catch((e) => { clearInterval(t); setMsg({ text: e.message, bad: true }); });
+    }, 3000);
+    return () => clearInterval(t);
+  }, [pendingPay]);
+  if (!prices) return <p className="text-sm text-stone-500 dark:text-stone-400">Connect to the internet to see prices and buy Pro.</p>;
+  const pay = async () => {
+    setMsg(null); setBusy(true);
+    try {
+      const r = await api('buy', { device: deviceCode, product, phone, church: church.trim() || undefined });
+      setLicState({ pendingPay: r.ref });
+      await openCheckout(r.url);
+      setMsg({ text: 'Finish paying in the browser, then come back here. Pro switches on by itself.' });
+    } catch (e) { setMsg({ text: e.message, bad: true }); } finally { setBusy(false); }
+  };
+  return (
+    <div className="space-y-2">
+      <div className="grid gap-2" role="radiogroup" aria-label="Choose Pro">
+        {[['pro', 'Pro for this device', 'Pay once, no end date'], ['year', 'Pro for one year', 'Renew each year']].filter(([id]) => prices[id] > 0).map(([id, title, sub]) => (
+          <button key={id} role="radio" aria-checked={product === id} onClick={() => setProduct(id)} className={`flex items-center gap-3 rounded-xl p-3 text-left ${product === id ? 'bg-green-600/10 ring-2 ring-green-600' : 'bg-paper-100 dark:bg-night-800'}`}>
+            <span className="flex-1"><span className="block text-sm font-bold">{title}</span><span className="block text-xs text-stone-500 dark:text-stone-400">{sub}</span></span>
+            <span className="text-base font-extrabold">{money(policy.currency, prices[id])}</span>
+          </button>
+        ))}
+      </div>
+      <input className="field" value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="Your phone number (to restore Pro later)" aria-label="Phone number" />
+      <input className="field" value={church} onChange={(e) => setChurch(e.target.value)} placeholder="Church name (optional)" aria-label="Church name" />
+      <button onClick={pay} disabled={busy || !phone.trim()} className="btn w-full bg-green-600 text-white hover:bg-green-700"><CreditCard size={16} /> {busy ? 'Starting…' : `Pay ${money(policy.currency, prices[product])} with MoMo or card`}</button>
+      {policy.provider === 'test' && <p className="text-xs text-amber-700 dark:text-amber-400">Test mode: no money is taken.</p>}
+      {pendingPay && <button onClick={() => checkPayment(pendingPay).then((ok) => !ok && setMsg({ text: 'Not paid yet. Finish in the browser, then try again.' })).catch((e) => setMsg({ text: e.message, bad: true }))} className="btn-soft w-full text-sm">I have paid: check now</button>}
+      {msg && <p role={msg.bad ? 'alert' : 'status'} className={`text-sm ${msg.bad ? 'text-red-600 dark:text-red-400' : 'text-stone-600 dark:text-stone-300'}`}>{msg.text}</p>}
+    </div>
+  );
+}
+
+function CodeSection() {
+  const { deviceCode, setLicence } = useStore();
+  const [code, setCode] = useState('');
+  const [msg, setMsg] = useState(null);
+  const go = async () => {
+    setMsg(null);
+    try { const r = await api('redeem', { device: deviceCode, code }); setLicence(r.licence); } catch (e) { setMsg(e.message); }
+  };
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        <input className="field uppercase" value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. GRACE-7K2M-9QXP" aria-label="Activation code" autoCapitalize="characters" autoCorrect="off" spellCheck={false} />
+        <button onClick={go} disabled={code.trim().length < 6} className="btn-soft shrink-0"><Ticket size={16} /> Use</button>
+      </div>
+      {msg && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{msg}</p>}
+    </div>
+  );
+}
+
+function RestoreSection() {
+  const { deviceCode, setLicence } = useStore();
+  const [phone, setPhone] = useState('');
+  const [code, setCode] = useState('');
+  const [step, setStep] = useState(1);
+  const [msg, setMsg] = useState(null);
+  const start = async () => { setMsg(null); try { await api('restore-start', { phone }); setStep(2); setMsg({ text: 'We sent a 6-digit code by SMS.' }); } catch (e) { setMsg({ text: e.message, bad: true }); } };
+  const finish = async () => { setMsg(null); try { const r = await api('restore-finish', { phone, code, device: deviceCode }); setLicence(r.licence); } catch (e) { setMsg({ text: e.message, bad: true }); } };
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-stone-500 dark:text-stone-400">New or reset phone? Pro moves here from the phone number used when paying (the old device stops being Pro).</p>
+      {step === 1 ? (
+        <div className="flex gap-2">
+          <input className="field" value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="Phone number used when paying" aria-label="Restore phone number" />
+          <button onClick={start} disabled={!phone.trim()} className="btn-soft shrink-0"><Phone size={16} /> Send code</button>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <input className="field" value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" placeholder="6-digit code" aria-label="SMS code" />
+          <button onClick={finish} disabled={code.trim().length !== 6} className="btn-soft shrink-0">Restore</button>
+        </div>
+      )}
+      {msg && <p role={msg.bad ? 'alert' : 'status'} className={`text-sm ${msg.bad ? 'text-red-600 dark:text-red-400' : 'text-stone-600 dark:text-stone-300'}`}>{msg.text}</p>}
+    </div>
+  );
+}
+
 // Shown when a locked feature is tapped (or the badge): what Pro includes and how to get it.
 export function Paywall() {
   const { paywall, openPaywall, licStatus } = useStore();
@@ -108,12 +242,18 @@ export function Paywall() {
         </div>
         {!done && (
           <>
-            <div className="space-y-2">
-              <div className="label">This device’s code</div>
-              <DeviceCode />
-              <p className="text-xs text-stone-500 dark:text-stone-400">To buy Pro, send this code to your Ɔsɔreɛ Plus dealer. You will receive a licence code to paste below. (Paying in the app with MoMo or card is coming soon.)</p>
-            </div>
-            <div className="space-y-2"><div className="label">Have a licence?</div><LicenceEntry onDone={close} /></div>
+            <div className="space-y-2"><div className="label">Buy Pro</div><BuySection /></div>
+            <div className="space-y-2"><div className="label">Have an activation code?</div><CodeSection /></div>
+            <div className="space-y-2"><div className="label">Restore Pro</div><RestoreSection /></div>
+            <details className="rounded-xl bg-paper-100 p-3 dark:bg-night-800">
+              <summary className="cursor-pointer text-sm font-semibold">Got a licence code from your dealer?</summary>
+              <div className="mt-3 space-y-2">
+                <div className="label">This device’s code</div>
+                <DeviceCode />
+                <LicenceEntry onDone={close} />
+              </div>
+            </details>
+            {useStore.getState().policy?.dealer && <p className="text-xs text-stone-500 dark:text-stone-400">Help: {useStore.getState().policy.dealer}</p>}
           </>
         )}
       </div>
