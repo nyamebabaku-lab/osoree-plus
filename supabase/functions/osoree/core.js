@@ -22,11 +22,14 @@ const phoneOf = (p) => { const d = String(p || '').replace(/\D/g, ''); return d.
 
 export async function settings(d) {
   const [row] = await d.query('select data from settings where id = 1');
-  return row?.data || {};
+  let data = row?.data || {};
+  if (typeof data === 'string') { try { data = JSON.parse(data); } catch { data = {}; } } // saved double-encoded by an older version
+  return data;
 }
 
 // What the app may know: prices, which features are Pro, trial length, who to call.
-const publicConfig = (s) => ({ trialDays: s.trialDays, pro: s.pro, currency: s.currency, prices: s.prices, provider: s.testMode ? 'test' : s.provider, dealer: s.dealer || '', products: PRODUCTS });
+const publicConfig = (s) => ({ trialDays: s.trialDays, pro: s.pro, currency: s.currency, prices: s.prices, provider: s.testMode ? 'test' : s.provider, dealer: s.dealer || '', products: PRODUCTS,
+  onlinePay: s.onlinePay !== false, momo: s.momoNumber ? { number: s.momoNumber, name: s.momoName || '', network: s.momoNetwork || '' } : null });
 
 async function issue(d, { device, product, church, phone, source, sourceRef }) {
   need(PRODUCTS[product], 'Unknown product.');
@@ -288,7 +291,11 @@ const ADMIN = {
     if (b.movesPerYear != null) { need(Number.isInteger(b.movesPerYear) && b.movesPerYear >= 0 && b.movesPerYear <= 12, 'Moves: 0 to 12 a year.'); next.movesPerYear = b.movesPerYear; }
     if (b.smsSender != null) { need(/^[A-Za-z0-9 ]{3,11}$/.test(b.smsSender), 'SMS sender: 3 to 11 letters or digits.'); next.smsSender = b.smsSender; }
     if (b.dealer != null) next.dealer = String(b.dealer).slice(0, 120);
-    await d.query('update settings set data = $1, updated_at = now() where id = 1', [JSON.stringify(next)]);
+    if (b.momoNumber != null) { const n = String(b.momoNumber).trim(); need(!n || phoneOf(n), 'MoMo number: a Ghana phone number, e.g. 024 123 4567.'); next.momoNumber = n ? phoneOf(n) : ''; }
+    if (b.momoName != null) next.momoName = String(b.momoName).trim().slice(0, 60);
+    if (b.momoNetwork != null) { need(['', 'MTN', 'Telecel', 'AirtelTigo'].includes(b.momoNetwork), 'Network: MTN, Telecel or AirtelTigo.'); next.momoNetwork = b.momoNetwork; }
+    if (b.onlinePay != null) next.onlinePay = !!b.onlinePay;
+    await d.query('update settings set data = $1::text::jsonb, updated_at = now() where id = 1', [JSON.stringify(next)]);
     return next;
   },
   async overview(d) {
@@ -298,7 +305,10 @@ const ADMIN = {
       (select count(*)::int from licences where status = 'active' and (expires_at is null or expires_at > now())) licences,
       (select coalesce(sum(amount), 0)::float from payments where status = 'paid' and provider <> 'test') revenue,
       (select coalesce(sum(amount), 0)::float from payments where status = 'paid' and provider <> 'test' and paid_at > date_trunc('month', now())) revenue_month,
-      (select count(*)::int from payments where status = 'paid' and provider = 'test') test_sales`);
+      (select count(*)::int from payments where status = 'paid' and provider = 'test') test_sales,
+      (select count(*)::int from licence_requests where status = 'pending') pending_requests,
+      (select coalesce(sum(amount), 0)::float from licence_requests where status = 'approved') momo_revenue,
+      (select coalesce(sum(amount), 0)::float from licence_requests where status = 'approved' and decided_at > date_trunc('month', now())) momo_revenue_month`);
     return x;
   },
   async payments(d, b) { return d.query('select * from payments order by created_at desc limit $1', [Math.min(500, b.limit || 100)]); },
@@ -328,6 +338,27 @@ const ADMIN = {
     return { codes: out };
   },
   async codes(d) { return d.query('select * from activation_codes order by created_at desc limit 300'); },
+  async requests(d, b) {
+    const st = ['pending', 'approved', 'declined'].includes(b.status) ? b.status : null;
+    const rows = st ? await d.query('select * from licence_requests where status = $1 order by created_at desc limit 200', [st])
+      : await d.query("select * from licence_requests where status <> 'replaced' order by created_at desc limit 200");
+    return rows.map((r) => ({ ...r, amount: Number(r.amount) }));
+  },
+  async approveRequest(d, b) {
+    const [r] = await d.query('select * from licence_requests where id = $1', [b.id]);
+    need(r, 'Request not found.', 404);
+    need(r.status === 'pending', `This request is already ${r.status}.`);
+    const lic = await issue(d, { device: r.device_code, product: r.product, church: r.church, phone: r.phone, source: 'request', sourceRef: r.id });
+    await d.query("update licence_requests set status = 'approved', licence_id = $2, decided_at = now() where id = $1", [r.id, lic.id]);
+    return { ok: true, licence: lic.token, id: lic.id };
+  },
+  async declineRequest(d, b) {
+    const [r] = await d.query('select status from licence_requests where id = $1', [b.id]);
+    need(r, 'Request not found.', 404);
+    need(r.status === 'pending', `This request is already ${r.status}.`);
+    await d.query("update licence_requests set status = 'declined', reason = $2, decided_at = now() where id = $1", [b.id, String(b.reason || '').trim().slice(0, 200) || null]);
+    return { ok: true };
+  },
   async smsLog(d) { return d.query('select phone, ok, reply, created_at from sms_log order by id desc limit 50'); },
   async recent(d) {
     return {
@@ -336,6 +367,37 @@ const ADMIN = {
     };
   },
 };
+
+// ----------------------------------------------------------------------------------------------- licence requests
+
+/** A church that paid by Mobile Money asks for Pro; the Super Admin approves it in the admin app. */
+async function request(d, { device, product, phone, church, momoRef, note }) {
+  need(DEVICE.test(device || ''), 'Bad device code.');
+  need(PRODUCTS[product], 'Choose Pro or Pro for one year.');
+  const ph = phoneOf(phone);
+  need(ph, 'Enter the phone number you paid from.');
+  const ref = String(momoRef || '').trim();
+  need(ref.length >= 4 && ref.length <= 40, 'Enter the MoMo transaction ID from the payment message.');
+  const s = await settings(d);
+  const amount = Number(s.prices?.[product]);
+  need(amount > 0, 'This product is not on sale yet.');
+  const recent = await d.query("select count(*)::int n from licence_requests where device_code = $1 and created_at > now() - interval '1 day'", [device]);
+  need(recent[0].n < 10, 'Too many requests today. Call the help line.', 429);
+  await d.query("update licence_requests set status = 'replaced', decided_at = now() where device_code = $1 and status = 'pending'", [device]);
+  const id = 'R' + d.random(10);
+  await d.query('insert into licence_requests (id, device_code, product, amount, currency, phone, church, momo_ref, note) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+    [id, device, product, amount, s.currency || 'GHS', ph, String(church || '').trim().slice(0, 80) || null, ref, String(note || '').trim().slice(0, 200) || null]);
+  return { id, status: 'pending' };
+}
+
+/** The newest request from this device, and its licence once approved. */
+async function requestStatus(d, { device }) {
+  need(DEVICE.test(device || ''), 'Bad device code.');
+  const [r] = await d.query('select id, product, amount, currency, momo_ref, status, reason, created_at from licence_requests where device_code = $1 order by created_at desc limit 1', [device]);
+  if (!r) return { status: 'none' };
+  const l = r.status === 'approved' ? await activeLicence(d, device) : null;
+  return { ...r, amount: Number(r.amount), licence: l?.token || null };
+}
 
 /** One entry point: route, body, the signed-in user (admin routes) and the raw request bits (webhooks). */
 export async function handle(d, route, body = {}, extra = {}) {
@@ -349,6 +411,8 @@ export async function handle(d, route, body = {}, extra = {}) {
     case 'restore-finish': return restoreFinish(d, body);
     case 'webhook': return webhook(d, extra);
     case 'test-pay': return testPay(d, body);
+    case 'request': return request(d, body);
+    case 'request-status': return requestStatus(d, body);
     default: {
       const m = /^admin\/(\w+)$/.exec(route);
       if (m && ADMIN[m[1]]) {

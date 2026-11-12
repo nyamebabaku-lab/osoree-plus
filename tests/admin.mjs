@@ -139,6 +139,45 @@ await page.getByRole('button', { name: 'Save settings' }).click();
 await page.waitForSelector('text=SMS sender: 3 to 11');
 ok('bad sender ID explained', true);
 
+// MoMo settings and Pro requests
+await page.getByLabel('MoMo number').fill('024 123 4567');
+await page.getByLabel('MoMo name').fill('Brands Media');
+await page.getByRole('button', { name: 'MTN' }).click();
+await page.getByLabel('SMS sender').fill('OsoreePlus');
+await page.getByRole('button', { name: 'Hide' }).click();
+await page.getByRole('button', { name: 'Save settings' }).click();
+await page.waitForSelector('text=Saved.');
+const s2 = (await d.query('select data from settings'))[0].data;
+ok('MoMo details saved, online pay hidden', s2.momoNumber === '0241234567' && s2.momoName === 'Brands Media' && s2.momoNetwork === 'MTN' && s2.onlinePay === false, JSON.stringify(s2));
+await page.reload(); await page.waitForSelector('nav >> text=Requests');
+await page.locator('nav button', { hasText: 'Settings' }).click();
+ok('settings show what was saved after reopening', (await page.getByLabel('MoMo number').inputValue()) === '0241234567' && (await page.getByLabel('Price Pro').inputValue()) === '400');
+const r1 = await handle(d, 'request', { device: 'OSR-ABCD-EFGH-JKMN', product: 'pro', phone: '0201112222', momoRef: '58123456789', church: 'Bethel Chapel' });
+await handle(d, 'request', { device: 'OSR-2345-6789-ABCD', product: 'year', phone: '0559998888', momoRef: 'WRONG1', church: 'Faith Temple' });
+await page.locator('nav button', { hasText: 'Home' }).click();
+await page.waitForSelector('text=2 Pro requests are waiting');
+ok('home shows waiting requests', true);
+ok('badge on the Requests tab', (await page.locator('nav button', { hasText: 'Requests' }).innerText()).includes('2'));
+await page.getByText('2 Pro requests are waiting').click();
+await page.waitForSelector('text=58123456789');
+ok('request shows the MoMo transaction and amount', await page.locator('.card', { hasText: 'Bethel Chapel' }).innerText().then((t) => t.includes('GH₵400') && t.includes('0201112222')));
+await page.locator('.card', { hasText: 'Bethel Chapel' }).getByRole('button', { name: 'Approve' }).click();
+await page.waitForSelector('text=Approved.');
+const st1 = await handle(d, 'request-status', { device: 'OSR-ABCD-EFGH-JKMN' });
+ok('approved: the phone receives its licence', st1.status === 'approved' && st1.licence?.startsWith('OSP1.'));
+page.once('dialog', (dl) => dl.accept('MoMo payment not found'));
+await page.locator('.card', { hasText: 'Faith Temple' }).getByRole('button', { name: 'Decline' }).click();
+await page.waitForSelector('text=Declined.');
+ok('declined with a reason', (await handle(d, 'request-status', { device: 'OSR-2345-6789-ABCD' })).reason === 'MoMo payment not found');
+await page.waitForSelector('text=No requests waiting.');
+ok('nothing left waiting', !(await page.locator('nav button', { hasText: 'Requests' }).innerText()).match(/\d/));
+await page.getByRole('button', { name: 'Approved' }).click();
+await page.waitForSelector('.card >> text=Bethel Chapel');
+ok('approved list', true);
+await page.locator('nav button', { hasText: 'Home' }).click();
+await page.waitForSelector('.card >> text=Revenue');
+ok('MoMo sales in the revenue', await page.locator('.card', { hasText: 'Revenue' }).first().innerText().then((t) => t.includes('400')));
+
 // stays signed in; theme switch; sign out
 await page.reload();
 await page.waitForSelector('nav >> text=Licences');

@@ -25,6 +25,15 @@ export async function checkPayment(ref) {
 
 // Works out the device code, starts the trial on first use, keeps the Pro status up to date, and (when there is
 // internet) checks in with the server: the trial's real start, prices and Pro features, revoked or moved licences.
+// A Pro request paid by Mobile Money: once the Super Admin approves it, the licence arrives here.
+export async function checkRequest() {
+  const { deviceCode, setLicence, setLicState } = useStore.getState();
+  const r = await api('request-status', { device: deviceCode || await getDeviceCode() });
+  if (r.status === 'approved' && r.licence) { setLicence(r.licence); setLicState({ pendingReq: '' }); }
+  else if (r.status !== 'pending') setLicState({ pendingReq: '' });
+  return r;
+}
+
 export function useLicenceBoot() {
   const licence = useStore((s) => s.licence);
   const policy = useStore((s) => s.policy);
@@ -54,12 +63,14 @@ export function useLicenceBoot() {
         if (lic !== st.licence) patch.licence = lic;
         setLicState(patch);
         if (st.pendingPay) await checkPayment(st.pendingPay).catch(() => {});
+        if (st.pendingReq) await checkRequest().catch(() => {});
       } catch { /* offline: the saved status stands */ }
     };
     refresh().then(sync);
+    const q = setInterval(() => { if (useStore.getState().pendingReq) checkRequest().catch(() => {}); }, 30 * 1000);
     const t = setInterval(() => refresh(), 5 * 60 * 1000);
     const s = setInterval(sync, 6 * 60 * 60 * 1000);
-    return () => { on = false; clearInterval(t); clearInterval(s); };
+    return () => { on = false; clearInterval(t); clearInterval(s); clearInterval(q); };
   }, [setLicState]);
   useEffect(() => { recompute(setLicState); }, [licence, policy, setLicState]);
 }
@@ -149,30 +160,95 @@ function BuySection() {
     return () => clearInterval(t);
   }, [pendingPay]);
   if (!prices) return <p className="text-sm text-stone-500 dark:text-stone-400">Connect to the internet to see prices and buy Pro.</p>;
+  const online = policy.onlinePay !== false;
+  const choices = [['pro', 'Pro for this device', 'Pay once, no end date'], ['year', 'Pro for one year', 'Renew each year']].filter(([id]) => prices[id] > 0);
+  if (!choices.length) return <p className="text-sm text-stone-500 dark:text-stone-400">Pro is not on sale right now.{policy.dealer ? ` Contact ${policy.dealer}.` : ''}</p>;
+  const chosen = choices.some(([id]) => id === product) ? product : choices[0][0];
   const pay = async () => {
     setMsg(null); setBusy(true);
     try {
-      const r = await api('buy', { device: deviceCode, product, phone, church: church.trim() || undefined });
+      const r = await api('buy', { device: deviceCode, product: chosen, phone, church: church.trim() || undefined });
       setLicState({ pendingPay: r.ref });
       await openCheckout(r.url);
       setMsg({ text: 'Finish paying in the browser, then come back here. Pro switches on by itself.' });
     } catch (e) { setMsg({ text: e.message, bad: true }); } finally { setBusy(false); }
   };
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <div className="grid gap-2" role="radiogroup" aria-label="Choose Pro">
-        {[['pro', 'Pro for this device', 'Pay once, no end date'], ['year', 'Pro for one year', 'Renew each year']].filter(([id]) => prices[id] > 0).map(([id, title, sub]) => (
-          <button key={id} role="radio" aria-checked={product === id} onClick={() => setProduct(id)} className={`flex items-center gap-3 rounded-xl p-3 text-left ${product === id ? 'bg-green-600/10 ring-2 ring-green-600' : 'bg-paper-100 dark:bg-night-800'}`}>
+        {choices.map(([id, title, sub]) => (
+          <button key={id} role="radio" aria-checked={chosen === id} onClick={() => setProduct(id)} className={`flex items-center gap-3 rounded-xl p-3 text-left ${chosen === id ? 'bg-green-600/10 ring-2 ring-green-600' : 'bg-paper-100 dark:bg-night-800'}`}>
             <span className="flex-1"><span className="block text-sm font-bold">{title}</span><span className="block text-xs text-stone-500 dark:text-stone-400">{sub}</span></span>
             <span className="text-base font-extrabold">{money(policy.currency, prices[id])}</span>
           </button>
         ))}
       </div>
-      <input className="field" value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="Your phone number (to restore Pro later)" aria-label="Phone number" />
-      <input className="field" value={church} onChange={(e) => setChurch(e.target.value)} placeholder="Church name (optional)" aria-label="Church name" />
-      <button onClick={pay} disabled={busy || !phone.trim()} className="btn w-full bg-green-600 text-white hover:bg-green-700"><CreditCard size={16} /> {busy ? 'Starting…' : `Pay ${money(policy.currency, prices[product])} with MoMo or card`}</button>
-      {policy.provider === 'test' && <p className="text-xs text-amber-700 dark:text-amber-400">Test mode: no money is taken.</p>}
-      {pendingPay && <button onClick={() => checkPayment(pendingPay).then((ok) => !ok && setMsg({ text: 'Not paid yet. Finish in the browser, then try again.' })).catch((e) => setMsg({ text: e.message, bad: true }))} className="btn-soft w-full text-sm">I have paid: check now</button>}
+      {policy.momo && <MomoRequest product={chosen} />}
+      {online && (
+        <div className="space-y-2">
+          {policy.momo && <div className="label pt-1">Or pay online</div>}
+          <input className="field" value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="Your phone number (to restore Pro later)" aria-label="Phone number" />
+          <input className="field" value={church} onChange={(e) => setChurch(e.target.value)} placeholder="Church name (optional)" aria-label="Church name" />
+          <button onClick={pay} disabled={busy || !phone.trim()} className="btn w-full bg-green-600 text-white hover:bg-green-700"><CreditCard size={16} /> {busy ? 'Starting…' : `Pay ${money(policy.currency, prices[chosen])} with MoMo or card`}</button>
+          {policy.provider === 'test' && <p className="text-xs text-amber-700 dark:text-amber-400">Test mode: no money is taken.</p>}
+          {pendingPay && <button onClick={() => checkPayment(pendingPay).then((ok) => !ok && setMsg({ text: 'Not paid yet. Finish in the browser, then try again.' })).catch((e) => setMsg({ text: e.message, bad: true }))} className="btn-soft w-full text-sm">I have paid: check now</button>}
+          {msg && <p role={msg.bad ? 'alert' : 'status'} className={`text-sm ${msg.bad ? 'text-red-600 dark:text-red-400' : 'text-stone-600 dark:text-stone-300'}`}>{msg.text}</p>}
+        </div>
+      )}
+      {!online && !policy.momo && <p className="text-sm text-stone-500 dark:text-stone-400">{policy.dealer ? `To buy Pro, contact ${policy.dealer}.` : 'Buying is not open yet.'}</p>}
+    </div>
+  );
+}
+
+// Pay the Super Admin by Mobile Money, then send the transaction ID; Pro arrives when it is approved.
+function MomoRequest({ product }) {
+  const { policy, deviceCode, pendingReq, setLicState } = useStore();
+  const [phone, setPhone] = useState('');
+  const [ref, setRef] = useState('');
+  const [church, setChurch] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [req, setReq] = useState(null);
+  const m = policy.momo;
+  const amount = money(policy.currency, policy.prices[product]);
+  useEffect(() => { if (pendingReq) checkRequest().then(setReq).catch(() => {}); }, [pendingReq]);
+  useEffect(() => {
+    if (!pendingReq) return undefined;
+    const t = setInterval(() => checkRequest().then(setReq).catch(() => {}), 15000);
+    return () => clearInterval(t);
+  }, [pendingReq]);
+  const send = async () => {
+    setMsg(null); setBusy(true);
+    try {
+      const r = await api('request', { device: deviceCode, product, phone, momoRef: ref, church: church.trim() || undefined });
+      setLicState({ pendingReq: r.id }); setReq({ status: 'pending' });
+      setMsg({ text: 'Request sent. Pro switches on by itself as soon as your payment is confirmed (keep the internet on).' });
+    } catch (e) { setMsg({ text: e.message, bad: true }); } finally { setBusy(false); }
+  };
+  const check = () => checkRequest().then((r) => { setReq(r); if (r.status === 'pending') setMsg({ text: 'Still waiting for confirmation. You can close this; Pro switches on by itself.' }); }).catch((e) => setMsg({ text: e.message, bad: true }));
+  return (
+    <div className="space-y-2 rounded-xl bg-amber-400/10 p-3 ring-1 ring-amber-500/40">
+      <div className="label">Pay by Mobile Money</div>
+      <ol className="list-decimal space-y-1 pl-5 text-sm">
+        <li>Send <b>{amount}</b> to {m.network ? `${m.network} ` : ''}MoMo <b className="select-all">{m.number}</b>{m.name ? <> ({m.name})</> : null}.</li>
+        <li>Type the number you paid from and the <b>transaction ID</b> from the MoMo message.</li>
+        <li>Tap <b>Send Pro request</b>. Pro switches on once the payment is confirmed.</li>
+      </ol>
+      {pendingReq && req?.status === 'pending' ? (
+        <div className="space-y-2">
+          <p role="status" className="rounded-lg bg-white/60 p-2 text-sm font-semibold dark:bg-night-900/60">Request sent{req.momo_ref ? ` (transaction ${req.momo_ref})` : ''}. Waiting for confirmation…</p>
+          <button onClick={check} className="btn-soft w-full text-sm">Check now</button>
+          <button onClick={() => { setLicState({ pendingReq: '' }); setReq(null); }} className="w-full text-xs text-stone-500">Made a mistake? Send a new request</button>
+        </div>
+      ) : (
+        <>
+          {req?.status === 'declined' && <p role="alert" className="text-sm text-red-600 dark:text-red-400">Your last request was not approved{req.reason ? `: ${req.reason}` : '.'}{policy.dealer ? ` Contact ${policy.dealer}.` : ''}</p>}
+          <input className="field" value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="Number you paid from" aria-label="Number you paid from" />
+          <input className="field" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="MoMo transaction ID" aria-label="MoMo transaction ID" autoCapitalize="characters" autoCorrect="off" spellCheck={false} />
+          <input className="field" value={church} onChange={(e) => setChurch(e.target.value)} placeholder="Church name (optional)" aria-label="Church name for the request" />
+          <button onClick={send} disabled={busy || !phone.trim() || ref.trim().length < 4} className="btn w-full bg-green-600 text-white hover:bg-green-700">{busy ? 'Sending…' : 'Send Pro request'}</button>
+        </>
+      )}
       {msg && <p role={msg.bad ? 'alert' : 'status'} className={`text-sm ${msg.bad ? 'text-red-600 dark:text-red-400' : 'text-stone-600 dark:text-stone-300'}`}>{msg.text}</p>}
     </div>
   );

@@ -106,6 +106,39 @@ await p3.page.evaluate(() => { const s = JSON.parse(localStorage.getItem('osoree
 await p3.page.reload(); await p3.page.waitForSelector('nav');
 await p3.page.waitForSelector('h1 [aria-label="Pro"]', { timeout: 10000 }).then(() => ok('licence comes back after reinstalling', true), () => ok('licence comes back after reinstalling', false));
 
+// 8. paid by Mobile Money to the Super Admin: a Pro request, approved in the admin app
+await admin('saveSettings', { momoNumber: '0241234567', momoName: 'Brands Media', momoNetwork: 'MTN', onlinePay: false });
+const p4 = await phone(); await openPro(p4.page);
+await p4.page.waitForSelector('text=Pay by Mobile Money');
+ok('MoMo number and amount shown', await p4.page.getByText(/Send GH₵400 to MTN MoMo 0241234567 \(Brands Media\)/).isVisible());
+ok('online payment hidden when the admin hides it', !(await p4.page.getByRole('button', { name: /with MoMo or card/ }).count()));
+await p4.page.getByLabel('Number you paid from').fill('020 333 4444');
+await p4.page.getByLabel('MoMo transaction ID').fill('61234567890');
+await p4.page.getByLabel('Church name for the request').fill('Calvary Church');
+await p4.page.getByRole('button', { name: 'Send Pro request' }).click();
+await p4.page.waitForSelector('text=/Waiting for confirmation/');
+const [req] = await d.query("select * from licence_requests where device_code = $1", [p4.code]);
+ok('request reaches the Super Admin', req?.status === 'pending' && req.momo_ref === '61234567890' && req.church === 'Calvary Church' && Number(req.amount) === 400, JSON.stringify(req));
+ok('request kept if the app is closed', (await state(p4.page)).pendingReq === req.id);
+await admin('approveRequest', { id: req.id });
+await p4.page.getByRole('button', { name: 'Check now' }).click();
+await p4.page.waitForSelector('h1 [aria-label="Pro"]', { timeout: 10000 }).then(() => ok('approved: Pro switches on', true), () => ok('approved: Pro switches on', false));
+ok('request finished', !(await state(p4.page)).pendingReq);
+// approved while the app was closed: picked up at the next start
+const p5 = await phone();
+await handle(d, 'request', { device: p5.code, product: 'year', phone: '0205556666', momoRef: '77778888' });
+await p5.page.evaluate((id) => { const s = JSON.parse(localStorage.getItem('osoree-plus')); s.state.pendingReq = id; localStorage.setItem('osoree-plus', JSON.stringify(s)); }, (await d.query('select id from licence_requests where device_code = $1', [p5.code]))[0].id);
+await admin('approveRequest', { id: (await d.query('select id from licence_requests where device_code = $1', [p5.code]))[0].id });
+await p5.page.reload(); await p5.page.waitForSelector('nav');
+await p5.page.waitForSelector('h1 [aria-label="Pro"]', { timeout: 10000 }).then(() => ok('approved while closed: Pro at the next start', true), () => ok('approved while closed: Pro at the next start', false));
+// declined: the church sees why
+const p6 = await phone(); await openPro(p6.page);
+await p6.page.getByLabel('Number you paid from').fill('0207770000'); await p6.page.getByLabel('MoMo transaction ID').fill('FAKE1234');
+await p6.page.getByRole('button', { name: 'Send Pro request' }).click(); await p6.page.waitForSelector('text=/Waiting for confirmation/');
+await admin('declineRequest', { id: (await d.query('select id from licence_requests where device_code = $1', [p6.code]))[0].id, reason: 'Payment not found' });
+await p6.page.getByRole('button', { name: 'Check now' }).click();
+await p6.page.waitForSelector('text=/not approved: Payment not found/', { timeout: 5000 }).then(() => ok('declined request explained', true), () => ok('declined request explained', false));
+
 ok('no page errors', errs.length === 0, errs.join(' | '));
 console.log(pass, 'passed', fail, 'failed'); await b.close();
 process.exit(fail ? 1 : 0);

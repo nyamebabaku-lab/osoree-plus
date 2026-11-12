@@ -135,6 +135,48 @@ ok('revoked licence reported to its phone', (await call('hello', { device: 'OSR-
 const lic = await call('admin/licences', { q: 'Grace' }, { user: admin });
 ok('admin search by church', lic.length >= 3);
 
+// ---- Pro requests paid by Mobile Money
+const D = 'OSR-MNPQ-RSTU-VWXY';
+await call('admin/saveSettings', { momoNumber: '024 123 4567', momoName: 'Brands Media', momoNetwork: 'MTN', onlinePay: false, prices: { pro: 350, year: 250 } }, { user: admin });
+let mcfg = (await call("hello", { device: D })).config;
+ok("app sees the MoMo number and that online pay is hidden", mcfg.momo?.number === "0241234567" && mcfg.momo.name === "Brands Media" && mcfg.momo.network === "MTN" && mcfg.onlinePay === false, JSON.stringify(mcfg.momo));
+ok('bad MoMo number refused', (await call('admin/saveSettings', { momoNumber: '12' }, { user: admin })).error?.startsWith('MoMo number'));
+ok('request needs the transaction ID', (await call('request', { device: D, product: 'pro', phone: '0201112222', momoRef: '' })).error?.includes('transaction ID'));
+ok('request needs the phone', (await call('request', { device: D, product: 'pro', phone: '', momoRef: '12345678' })).error?.includes('phone'));
+const rq1 = await call('request', { device: D, product: 'pro', phone: '0201112222', momoRef: '11112222', church: 'Bethel' });
+const rq2 = await call('request', { device: D, product: 'year', phone: '0201112222', momoRef: '33334444', church: 'Bethel Chapel' });
+ok('a new request replaces the waiting one', rq2.status === 'pending' && (await d.query("select status from licence_requests where id = $1", [rq1.id]))[0].status === 'replaced');
+let rs = await call('request-status', { device: D });
+ok('app sees its request waiting', rs.status === 'pending' && rs.momo_ref === '33334444' && rs.amount === 250 && !rs.licence, JSON.stringify(rs));
+const notBoss = await call('admin/requests', {}, { user: { id: '00000000-0000-0000-0000-0000000000ff', email: 'x@y.z' } });
+ok('requests are Super Admin only', notBoss.status === 403, JSON.stringify(notBoss));
+let waiting = await call('admin/requests', { status: 'pending' }, { user: admin });
+ok('Super Admin sees the waiting request', waiting.length === 1 && waiting[0].church === 'Bethel Chapel' && waiting[0].amount === 250);
+ok('overview counts it', (await call('admin/overview', {}, { user: admin })).pending_requests === 1);
+const ap = await call('admin/approveRequest', { id: rq2.id }, { user: admin });
+ok('approving issues a one-year licence for that device', ap.licence && readLic(ap.licence).ok && readLic(ap.licence).p.d === D && readLic(ap.licence).p.e - readLic(ap.licence).p.i > 360 * 86400, JSON.stringify(ap).slice(0, 200));
+ok('cannot approve twice', (await call('admin/approveRequest', { id: rq2.id }, { user: admin })).error?.includes('already approved'));
+rs = await call('request-status', { device: D });
+ok('app receives the licence', rs.status === 'approved' && rs.licence === ap.licence);
+ok('hello gives it too', (await call('hello', { device: D })).licence === ap.licence);
+const ov2 = await call('admin/overview', {}, { user: admin });
+ok('MoMo money counted', ov2.momo_revenue === 250 && ov2.pending_requests === 0, JSON.stringify(ov2));
+const E = 'OSR-ABCD-EFGH-JKLM';
+const rq3 = await call('request', { device: E, product: 'pro', phone: '0207778888', momoRef: 'BADREF1' });
+await call('admin/declineRequest', { id: rq3.id, reason: 'Payment not found' }, { user: admin });
+rs = await call('request-status', { device: E });
+ok('declined request explained to the app', rs.status === 'declined' && rs.reason === 'Payment not found' && !rs.licence);
+// settings stored as a quoted string by the old server: still read, and repaired by the next save
+await pg.query("update settings set data = to_jsonb($1::text) where id = 1", [JSON.stringify({ trialDays: 21, pro: ['stream'], prices: { pro: 300, year: 200 }, currency: 'GHS', provider: 'paystack', testMode: true })]);
+mcfg = (await call("hello", { device: D })).config;
+ok("double-encoded settings still read", mcfg.trialDays === 21 && mcfg.prices.pro === 300, JSON.stringify(mcfg).slice(0, 80));
+await call('admin/saveSettings', { trialDays: 30 }, { user: admin });
+const raw = (await pg.query("select jsonb_typeof(data) t, data->>'trialDays' n, data->'prices'->>'pro' p from settings")).rows[0];
+ok('saving repairs them', raw.t === 'object' && raw.n === '30' && raw.p === '300', JSON.stringify(raw));
+await pg.query("update settings set data = to_jsonb($1::text) where id = 1", [JSON.stringify({ trialDays: 9 })]);
+await pg.exec(fs.readFileSync('supabase/migrations/0003_requests.sql', 'utf8'));
+ok('the migration repairs them too', (await pg.query("select jsonb_typeof(data) t, data->>'trialDays' n from settings")).rows[0].t === 'object');
+
 // ---- the public API keys can read nothing
 await pg.exec("create role anon; grant select on all tables in schema public to anon;");
 await pg.exec('set role anon');

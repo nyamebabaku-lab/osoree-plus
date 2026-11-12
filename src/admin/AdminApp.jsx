@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Copy, Home, KeyRound, LogOut, Moon, RefreshCw, Settings, Share2, Sun, Ticket } from 'lucide-react';
+import { Check, Copy, Home, Inbox, KeyRound, LogOut, Moon, RefreshCw, Settings, Share2, Sun, Ticket, X } from 'lucide-react';
 import { admin, sb } from './api.js';
 import { FEATURES } from '../lib/licence.js';
 import { Empty, Seg } from '../ui.jsx';
@@ -72,8 +72,9 @@ function SignIn({ onIn }) {
 }
 
 // ------------------------------------------------------------------------------------------- home
-function HomeTab() {
+function HomeTab({ go, onCount }) {
   const o = useLoad(() => admin('overview'), []);
+  useEffect(() => { if (o.data) onCount(o.data.pending_requests || 0); }, [o.data, onCount]);
   const r = useLoad(() => admin('recent'), []);
   const s = useLoad(() => admin('settings'), []);
   const x = o.data;
@@ -81,8 +82,9 @@ function HomeTab() {
     <div className="space-y-4">
       {s.data?.testMode && <p className="rounded-xl bg-amber-500/15 p-3 text-sm font-semibold text-amber-800 dark:text-amber-300">Test mode is on: payments are simulated and no money is taken. Switch it off in Settings when your payment keys are saved.</p>}
       {o.error && <p className="text-sm text-red-600">{o.error}</p>}
+      {x?.pending_requests > 0 && <button onClick={() => go('requests')} className="w-full rounded-xl bg-green-600 p-3 text-left text-sm font-bold text-white">{x.pending_requests} Pro {x.pending_requests === 1 ? 'request is' : 'requests are'} waiting for you. Tap to check the MoMo payment and approve.</button>}
       <div className="grid grid-cols-2 gap-2">
-        {[['Revenue', money(x?.revenue)], ['This month', money(x?.revenue_month)], ['Active Pro', x?.licences], ['Devices', x?.devices], ['Used in 30 days', x?.active30], ['Test sales', x?.test_sales]].map(([k, v]) => (
+        {[['Revenue', x && money(x.revenue + (x.momo_revenue || 0))], ['This month', x && money(x.revenue_month + (x.momo_revenue_month || 0))], ['Active Pro', x?.licences], ['Devices', x?.devices], ['Used in 30 days', x?.active30], ['Test sales', x?.test_sales]].map(([k, v]) => (
           <div key={k} className="card p-3"><div className="label">{k}</div><div className="mt-1 text-xl font-extrabold">{v ?? '…'}</div></div>
         ))}
       </div>
@@ -181,6 +183,45 @@ function LicencesTab() {
   );
 }
 
+// ------------------------------------------------------------------------------------------- requests
+const REQ = { pending: ['WAITING', 'bg-amber-500'], approved: ['APPROVED', 'bg-green-600'], declined: ['DECLINED', 'bg-stone-500'] };
+function RequestsTab({ onChange }) {
+  const [filter, setFilter] = useState('pending');
+  const list = useLoad(() => admin('requests', { status: filter === 'all' ? undefined : filter }), [filter]);
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState('');
+  const act = async (id, fn, ok) => { setMsg(null); setBusy(id); try { await fn(); setMsg({ text: ok }); list.reload(); onChange(); } catch (e) { setMsg({ text: e.message, bad: true }); } finally { setBusy(''); } };
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-stone-500 dark:text-stone-400">Churches pay your MoMo number, then send the transaction ID from the app. Check the payment in your MoMo messages, then approve: the church's phone switches to Pro by itself.</p>
+      <div className="flex items-center justify-between gap-2">
+        <Seg label="Show requests" value={filter} onChange={setFilter} options={[['pending', 'Waiting'], ['approved', 'Approved'], ['declined', 'Declined'], ['all', 'All']]} />
+        <button onClick={list.reload} aria-label="Refresh requests" className="icon-btn"><RefreshCw size={16} /></button>
+      </div>
+      <Msg m={msg} />
+      {list.error && <p className="text-sm text-red-600">{list.error}</p>}
+      {list.data && !list.data.length && <Empty>{filter === 'pending' ? 'No requests waiting.' : 'No requests.'}</Empty>}
+      {list.data?.map((r) => (
+        <div key={r.id} className="card space-y-1.5 p-3 text-sm">
+          <div className="flex items-center gap-2">
+            <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold text-white ${(REQ[r.status] || REQ.declined)[1]}`}>{(REQ[r.status] || REQ.declined)[0]}</span>
+            <b className="min-w-0 flex-1 truncate">{r.church || r.phone}</b>
+            <b>{money(r.amount, r.currency)}</b>
+          </div>
+          <div>MoMo transaction: <b className="select-all font-mono">{r.momo_ref}</b> · from <b>{r.phone}</b></div>
+          <div className="text-xs text-stone-500">{PRODUCT[r.product]} · {r.device_code} · {when(r.created_at)}{r.reason ? ` · ${r.reason}` : ''}</div>
+          {r.status === 'pending' && (
+            <div className="flex gap-2 pt-1">
+              <button disabled={busy === r.id} onClick={() => act(r.id, () => admin('approveRequest', { id: r.id }), `Approved. ${r.church || r.phone} gets Pro the next time the app is online.`)} className="btn flex-1 bg-green-600 text-white"><Check size={16} /> Approve</button>
+              <button disabled={busy === r.id} onClick={() => { const reason = window.prompt('Why are you declining? (the church sees this)', 'Payment not found'); if (reason !== null) act(r.id, () => admin('declineRequest', { id: r.id, reason }), 'Declined.'); }} className="btn-soft flex-1 text-red-600"><X size={16} /> Decline</button>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------------------------------- codes
 function CodesTab() {
   const [f, setF] = useState({ prefix: '', product: 'pro', uses: 1, count: 1, church: '', note: '', expires: '' });
@@ -228,13 +269,14 @@ function SettingsTab() {
   const s = useLoad(() => admin('settings'), []);
   const [f, setF] = useState(null);
   const [msg, setMsg] = useState(null);
-  useEffect(() => { if (s.data) setF(s.data); }, [s.data]);
+  const withDefaults = (d) => ({ trialDays: 30, pro: [], prices: { pro: 0, year: 0 }, provider: 'paystack', testMode: true, movesPerYear: 2, smsSender: '', dealer: '', momoNumber: '', momoName: '', momoNetwork: '', onlinePay: true, ...d, prices: { pro: 0, year: 0, ...(d?.prices || {}) }, pro: Array.isArray(d?.pro) ? d.pro : [] });
+  useEffect(() => { if (s.data) setF(withDefaults(s.data)); }, [s.data]);
   if (!f) return s.error ? <p className="text-sm text-red-600">{s.error}</p> : <Empty>Loading…</Empty>;
   const save = async () => {
     setMsg(null);
     try {
-      const next = await admin('saveSettings', { trialDays: Number(f.trialDays), pro: f.pro, prices: { pro: Number(f.prices.pro), year: Number(f.prices.year) }, provider: f.provider, testMode: f.testMode, movesPerYear: Number(f.movesPerYear), smsSender: f.smsSender, dealer: f.dealer });
-      setF(next); setMsg({ text: 'Saved. Phones pick up the changes the next time they go online.' });
+      const next = await admin('saveSettings', { trialDays: Number(f.trialDays), pro: f.pro, prices: { pro: Number(f.prices.pro), year: Number(f.prices.year) }, provider: f.provider, testMode: f.testMode, movesPerYear: Number(f.movesPerYear), smsSender: f.smsSender, dealer: f.dealer, momoNumber: f.momoNumber, momoName: f.momoName, momoNetwork: f.momoNetwork, onlinePay: f.onlinePay });
+      setF(withDefaults(next)); setMsg({ text: 'Saved. Phones pick up the changes the next time they go online.' });
     } catch (e) { setMsg({ text: e.message, bad: true }); }
   };
   const toggle = (k) => setF({ ...f, pro: f.pro.includes(k) ? f.pro.filter((x) => x !== k) : [...f.pro, k] });
@@ -257,7 +299,15 @@ function SettingsTab() {
         ))}
       </section>
       <section className="card space-y-3 p-4">
-        <div className="label">Payments</div>
+        <div className="label">Pay by Mobile Money (Pro requests)</div>
+        <p className="text-xs text-stone-500 dark:text-stone-400">Churches see this number in the app, pay you, and send the transaction ID. You approve each request in Requests. Leave the number empty to switch this off.</p>
+        <label className="block text-xs font-semibold">Your MoMo number<input className="field mt-1" inputMode="tel" value={f.momoNumber} onChange={(e) => setF({ ...f, momoNumber: e.target.value })} placeholder="e.g. 024 123 4567" aria-label="MoMo number" /></label>
+        <label className="block text-xs font-semibold">Name on the MoMo account<input className="field mt-1" value={f.momoName} onChange={(e) => setF({ ...f, momoName: e.target.value })} aria-label="MoMo name" /></label>
+        <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-semibold">Network</span><Seg label="MoMo network" value={f.momoNetwork} onChange={(momoNetwork) => setF({ ...f, momoNetwork })} options={[['MTN', 'MTN'], ['Telecel', 'Telecel'], ['AirtelTigo', 'AirtelTigo']]} /></div>
+      </section>
+      <section className="card space-y-3 p-4">
+        <div className="label">Online payments (Paystack / Hubtel)</div>
+        <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-semibold">Show in the app</span><Seg label="Online payments" value={f.onlinePay} onChange={(onlinePay) => setF({ ...f, onlinePay })} options={[[true, 'Show'], [false, 'Hide']]} /></div>
         <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-semibold">Provider</span><Seg label="Payment provider" value={f.provider} onChange={(provider) => setF({ ...f, provider })} options={[['paystack', 'Paystack'], ['hubtel', 'Hubtel']]} /></div>
         <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-semibold">Test mode</span><Seg label="Test mode" value={f.testMode} onChange={(testMode) => setF({ ...f, testMode })} options={[[true, 'On (no money)'], [false, 'Off (real money)']]} /></div>
         {!f.testMode && <p className="text-xs text-amber-700 dark:text-amber-400">Real payments need the provider's keys saved on the server ({f.provider === 'paystack' ? 'PAYSTACK_SECRET_KEY' : 'HUBTEL_API_ID, HUBTEL_API_KEY, HUBTEL_POS_SALES_ID'}). If they are missing, buying shows an error.</p>}
@@ -275,12 +325,14 @@ function SettingsTab() {
 }
 
 // ------------------------------------------------------------------------------------------- shell
-const TABS = [['home', 'Home', Home], ['licences', 'Licences', KeyRound], ['codes', 'Codes', Ticket], ['settings', 'Settings', Settings]];
+const TABS = [['home', 'Home', Home], ['requests', 'Requests', Inbox], ['licences', 'Licences', KeyRound], ['codes', 'Codes', Ticket], ['settings', 'Settings', Settings]];
 
 export default function AdminApp() {
   const [session, setSession] = useState(undefined);
   const [claim, setClaim] = useState({ ok: false, error: '' });
   const [tab, setTab] = useState('home');
+  const [waiting, setWaiting] = useState(0);
+  const countWaiting = useCallback(() => admin('overview').then((o) => setWaiting(o.pending_requests || 0)).catch(() => {}), []);
   const [dark, setDark] = useState(() => { try { return localStorage.getItem('osoree-admin-theme') !== 'light'; } catch { return true; } });
   useEffect(() => { document.documentElement.classList.toggle('dark', dark); try { localStorage.setItem('osoree-admin-theme', dark ? 'dark' : 'light'); } catch { /* ignore */ } }, [dark]);
   useEffect(() => {
@@ -290,8 +342,13 @@ export default function AdminApp() {
   }, []);
   useEffect(() => {
     if (!session) return;
-    admin('claim').then(() => setClaim({ ok: true, error: '' })).catch((e) => setClaim({ ok: false, error: e.message }));
-  }, [session]);
+    admin('claim').then(() => { setClaim({ ok: true, error: '' }); countWaiting(); }).catch((e) => setClaim({ ok: false, error: e.message }));
+  }, [session, countWaiting]);
+  useEffect(() => {
+    if (!claim.ok) return undefined;
+    const t = setInterval(countWaiting, 60000);
+    return () => clearInterval(t);
+  }, [claim.ok, countWaiting]);
   if (session === undefined) return <Empty>Opening…</Empty>;
   if (!session) return <SignIn onIn={() => {}} />;
   return (
@@ -304,7 +361,8 @@ export default function AdminApp() {
       <main className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
         {!claim.ok ? (claim.error ? <p className="rounded-xl bg-red-600/10 p-3 text-sm text-red-700 dark:text-red-400">{claim.error}</p> : <Empty>Checking your account…</Empty>) : (
           <>
-            {tab === 'home' && <HomeTab />}
+            {tab === 'home' && <HomeTab go={setTab} onCount={setWaiting} />}
+            {tab === 'requests' && <RequestsTab onChange={countWaiting} />}
             {tab === 'licences' && <LicencesTab />}
             {tab === 'codes' && <CodesTab />}
             {tab === 'settings' && <SettingsTab />}
@@ -312,9 +370,9 @@ export default function AdminApp() {
         )}
       </main>
       {claim.ok && (
-        <nav className="grid grid-cols-4 border-t border-paper-200 bg-white pb-[env(safe-area-inset-bottom)] dark:border-night-700 dark:bg-night-900">
+        <nav className="grid grid-cols-5 border-t border-paper-200 bg-white pb-[env(safe-area-inset-bottom)] dark:border-night-700 dark:bg-night-900">
           {TABS.map(([id, label, Icon]) => (
-            <button key={id} onClick={() => setTab(id)} className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-semibold ${tab === id ? 'text-green-600' : 'text-stone-500 dark:text-stone-400'}`}><Icon size={20} />{label}</button>
+            <button key={id} onClick={() => setTab(id)} className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-semibold ${tab === id ? 'text-green-600' : 'text-stone-500 dark:text-stone-400'}`}><span className="relative"><Icon size={20} />{id === 'requests' && waiting > 0 && <span className="absolute -right-2.5 -top-1.5 min-w-4 rounded-full bg-red-600 px-1 text-[10px] leading-4 text-white">{waiting}</span>}</span>{label}</button>
           ))}
         </nav>
       )}
