@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { StoreButton } from '../StoreSheet.jsx';
 import { FileText, Film, ImagePlus, Layers, ListPlus, MonitorPlay, Moon, PictureInPicture2, Play, Trash2 } from 'lucide-react';
 import { useStore } from '../store.js';
 import { addMediaFiles, formatName, formatSize, pickNativeMedia, removeMediaFile, useMediaUrl } from '../lib/media.js';
@@ -130,6 +131,7 @@ export default function MediaTab() {
   return (
     <div className="space-y-3">
       <button onClick={pick} className="btn-gold w-full"><ImagePlus size={18} /> Add pictures, videos or documents</button>
+      <StoreButton />
       <input ref={file} type="file" accept="image/*,video/mp4,video/webm,.mp4,.m4v,application/pdf,.pdf,.pptx,.docx,.xlsx,.csv,.txt,.ppt,.doc,.xls" multiple hidden onChange={onFiles} />
       {msg && <p className={`px-1 text-sm ${msg.bad ? 'text-red-600 dark:text-red-400' : 'text-stone-600 dark:text-stone-300'}`}>{msg.text}</p>}
       {!media.length ? <Empty>Add your church logo, announcement pictures, MP4 videos, PDFs, PowerPoint, Word and Excel files. They stay on this device and work without internet.</Empty> : (

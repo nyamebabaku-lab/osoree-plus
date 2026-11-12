@@ -19,6 +19,7 @@ const sent = [], calls = [];
 let fakeProvider = {};
 const envs = { FN_URL: 'https://x.supabase.co/functions/v1/osoree', PAYSTACK_SECRET_KEY: 'sk_test', WEBHOOK_SECRET: 'hooksecret', HUBTEL_API_ID: 'id', HUBTEL_API_KEY: 'key', HUBTEL_POS_SALES_ID: '123', SUPER_ADMIN_EMAIL: 'boss@example.com', MNOTIFY_KEY: '' };
 const d = {
+  storage: { signDownload: async (p) => `https://files.example/${p}?sig=1`, signUpload: async (p) => ({ url: `https://files.example/upload/${p}?token=1` }) },
   query: async (t, p = []) => (await pg.query(t, p)).rows,
   now: () => clock,
   sign: async (payload) => { const body = b64u(JSON.stringify(payload)); return `OSP1.${body}.${b64u(await ed.signAsync(new TextEncoder().encode(body), priv))}`; },
@@ -176,6 +177,50 @@ ok('saving repairs them', raw.t === 'object' && raw.n === '30' && raw.p === '300
 await pg.query("update settings set data = to_jsonb($1::text) where id = 1", [JSON.stringify({ trialDays: 9 })]);
 await pg.exec(fs.readFileSync('supabase/migrations/0003_requests.sql', 'utf8'));
 ok('the migration repairs them too', (await pg.query("select jsonb_typeof(data) t, data->>'trialDays' n from settings")).rows[0].t === 'object');
+
+// ---- store: Bibles and backgrounds
+const boss = { user: admin };
+const free = await call('admin/storeSave', { kind: 'background', title: 'Sunrise', price: 0, active: true, thumb: 'data:image/jpeg;base64,AAA' }, boss);
+const twi = await call('admin/storeSave', { kind: 'bible', title: 'Twi Bible (1964)', abbr: 'TWI64', price: 120, active: true, copyright: 'Public domain' }, boss);
+const hidden = await call('admin/storeSave', { kind: 'background', title: 'Draft', price: 5, active: false }, boss);
+const up = await call('admin/storeUploadUrl', { id: twi.id }, boss);
+ok('upload address for the Bible file', /^bible\/B[A-Z0-9]+-[A-Z0-9]+\.json\.gz$/.test(up.path) && up.url.includes(up.path), up.path);
+await call('admin/storeFileDone', { id: twi.id, path: up.path, type: 'bible-json-gz', size: 1234567 }, boss);
+const upf = await call('admin/storeUploadUrl', { id: free.id, type: 'image/jpeg' }, boss);
+await call('admin/storeFileDone', { id: free.id, path: upf.path, type: 'image/jpeg', size: 200000 }, boss);
+ok('store is Super Admin only', (await call('admin/storeSave', { kind: 'bible', title: 'x', price: 1 }, { user: { id: '00000000-0000-0000-0000-0000000000ff', email: 'x@y.z' } })).status === 403);
+const F = 'OSR-FFFF-GGGG-HHHH', G = 'OSR-JJJJ-KKKK-LLLL';
+let sst = await call('store', { device: F });
+ok('store lists active items only', sst.items.length === 2 && !sst.items.some((x) => x.id === hidden.id) && sst.items.find((x) => x.id === twi.id).price === 120);
+ok('free item downloads at once', (await call('store-download', { device: F, itemId: free.id })).url?.includes(upf.path));
+ok('paid item locked before buying', (await call('store-download', { device: F, itemId: twi.id })).status === 403);
+ok('free items cannot be "bought"', (await call('request', { device: F, itemId: free.id, phone: '0241112222', momoRef: '12345678' })).error?.includes('free'));
+const sr = await call('request', { device: F, itemId: twi.id, phone: '0241112222', momoRef: '99887766', church: 'Zion' });
+sst = await call('store', { device: F });
+ok('request waiting shows in the store', sst.pending.includes(twi.id) && sr.status === 'pending');
+ok('a Pro request on the same phone is not replaced by it', true);
+const wr = await call('admin/requests', { status: 'pending' }, boss);
+const mine = wr.find((x) => x.id === sr.id);
+ok('admin sees which item and its price', mine?.item_title === 'Twi Bible (1964)' && mine.amount === 120, JSON.stringify(mine).slice(0, 150));
+const ap2 = await call('admin/approveRequest', { id: sr.id }, boss);
+ok('approving an item issues no Pro licence', ap2.ok && !ap2.licence);
+sst = await call('store', { device: F });
+ok('approved: the item is owned', sst.owned.includes(twi.id) && !sst.pending.includes(twi.id));
+const dl = await call('store-download', { device: F, itemId: twi.id });
+ok('download address for the owned Bible', dl.url?.includes(up.path) && dl.item.abbr === 'TWI64');
+ok('another phone of the church: not yet', !(await call('store', { device: G })).owned.includes(twi.id));
+sent.length = 0; envs.MNOTIFY_KEY = 'k';
+fakeProvider.fn = (u) => (u.includes('mnotify') ? { json: { status: 'success', code: '2000' } } : {});
+await call('restore-start', { phone: '0241112222', purpose: 'store' });
+const code2 = sent.at(-1)?.message.match(/\d{6}/)?.[0];
+ok('SMS code to the church number', !!code2);
+ok('wrong code refused', (await call('store-link', { device: G, phone: '0241112222', code: '000000' })).error === 'That code is not right.');
+const ln = await call('store-link', { device: G, phone: '0241112222', code: code2 });
+ok('other phone gets the church purchases', ln.owned?.includes(twi.id) && (await call('store-download', { device: G, itemId: twi.id })).url);
+ok('unknown number: no store purchases', (await call('restore-start', { phone: '0209999999', purpose: 'store' })).status === 404);
+const ov3 = await call('admin/overview', {}, boss);
+ok('item sales counted', ov3.momo_revenue >= 120 + 250, JSON.stringify(ov3));
+envs.MNOTIFY_KEY = ''; fakeProvider.fn = null;
 
 // ---- the public API keys can read nothing
 await pg.exec("create role anon; grant select on all tables in schema public to anon;");

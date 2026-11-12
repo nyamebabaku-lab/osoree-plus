@@ -70,6 +70,7 @@ export const useStore = create(persist((set, get) => {
   policy: null, // from the server: trial length, Pro features, prices, provider, dealer (kept for offline use)
   pendingPay: '', // a payment the app is waiting for (reference)
   pendingReq: '', // a Pro request (paid by MoMo) waiting for the Super Admin
+  storePending: false, // a store purchase waiting for the Super Admin (the app checks every 30 s)
   camAddress: '', // camera mode: the main phone's address
   camStatus: null, // this phone's camera while live video is on: { state, screens } or { error }
 

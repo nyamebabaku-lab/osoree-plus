@@ -442,6 +442,33 @@ public class ScreenPlugin extends Plugin implements DisplayManager.DisplayListen
         });
     }
 
+    /** Store backgrounds: download straight to the media folder (big videos never pass through the WebView). */
+    @PluginMethod
+    public void downloadMedia(PluginCall call) {
+        final String url = call.getString("url", ""), id = call.getString("id", ""), ext = call.getString("ext", "jpg");
+        if (!url.startsWith("https://") || !id.matches("[A-Za-z0-9]+") || !ext.matches("jpg|png|mp4")) { call.reject("Bad download."); return; }
+        io.execute(() -> {
+            File out = new File(mediaDir, id + "." + ext);
+            try {
+                mediaDir.mkdirs();
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+                c.setConnectTimeout(15000); c.setReadTimeout(30000);
+                if (c.getResponseCode() != 200) throw new java.io.IOException("HTTP " + c.getResponseCode());
+                try (java.io.InputStream in = c.getInputStream(); OutputStream os = new FileOutputStream(out)) {
+                    byte[] buf = new byte[65536]; int n;
+                    while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+                }
+                JSObject r = new JSObject();
+                r.put("path", out.getAbsolutePath());
+                r.put("size", out.length());
+                call.resolve(r);
+            } catch (Exception e) {
+                out.delete();
+                call.reject("The download did not finish. Check the internet and try again.", e);
+            }
+        });
+    }
+
     @PluginMethod
     public void deleteMedia(PluginCall call) {
         String path = call.getString("path", "");

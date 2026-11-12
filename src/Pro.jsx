@@ -5,6 +5,7 @@ import { DEFAULT_POLICY, FEATURES, checkLicence, getDeviceCode, isUnlocked, lice
 import { api, openCheckout } from './lib/server.js';
 import { IS_NATIVE } from './lib/output.js';
 import { Sheet } from './ui.jsx';
+import { syncStore } from './lib/store-client.js';
 
 const policyOf = (st) => ({ ...DEFAULT_POLICY, ...(st.policy ? { trialDays: st.policy.trialDays ?? DEFAULT_POLICY.trialDays, pro: st.policy.pro || DEFAULT_POLICY.pro } : {}) });
 
@@ -64,10 +65,11 @@ export function useLicenceBoot() {
         setLicState(patch);
         if (st.pendingPay) await checkPayment(st.pendingPay).catch(() => {});
         if (st.pendingReq) await checkRequest().catch(() => {});
+        syncStore().catch(() => {});
       } catch { /* offline: the saved status stands */ }
     };
     refresh().then(sync);
-    const q = setInterval(() => { if (useStore.getState().pendingReq) checkRequest().catch(() => {}); }, 30 * 1000);
+    const q = setInterval(() => { const g = useStore.getState(); if (g.pendingReq) checkRequest().catch(() => {}); if (g.storePending) syncStore().catch(() => {}); }, 30 * 1000);
     const t = setInterval(() => refresh(), 5 * 60 * 1000);
     const s = setInterval(sync, 6 * 60 * 60 * 1000);
     return () => { on = false; clearInterval(t); clearInterval(s); clearInterval(q); };

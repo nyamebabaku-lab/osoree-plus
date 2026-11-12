@@ -20,7 +20,21 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const text = (t: string) => new Response(t + '\n', { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
 
 const hex = (b: ArrayBuffer) => Array.from(new Uint8Array(b), (x) => x.toString(16).padStart(2, '0')).join('');
+// Private store files: one-time signed addresses (service key stays on the server).
+const storage = {
+  async signDownload(path: string) {
+    const r = await fetch(`${env('SUPABASE_URL')}/storage/v1/object/sign/store/${path}`, { method: 'POST', headers: { Authorization: `Bearer ${env('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ expiresIn: 3600 }) });
+    const j = await r.json(); if (!r.ok) throw new Error(j.message || 'Storage error');
+    return `${env('SUPABASE_URL')}/storage/v1${j.signedURL}`;
+  },
+  async signUpload(path: string) {
+    const r = await fetch(`${env('SUPABASE_URL')}/storage/v1/object/upload/sign/store/${path}`, { method: 'POST', headers: { Authorization: `Bearer ${env('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' }, body: '{}' });
+    const j = await r.json(); if (!r.ok) throw new Error(j.message || 'Storage error');
+    return { url: `${env('SUPABASE_URL')}/storage/v1${j.url}` };
+  },
+};
 const deps = {
+  storage,
   query: (text: string, params: unknown[] = []) => sql.unsafe(text, params as never[]),
   now: () => new Date(),
   async sign(payload: unknown) {

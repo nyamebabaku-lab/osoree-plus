@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Copy, Home, Inbox, KeyRound, LogOut, Moon, RefreshCw, Settings, Share2, Sun, Ticket, X } from 'lucide-react';
+import { Check, Copy, Home, Inbox, KeyRound, LogOut, Moon, RefreshCw, Settings, Share2, ShoppingBag, Sun, Ticket, Upload, X } from 'lucide-react';
+import { gzipSync, unzipSync } from 'fflate';
+import { decodeXml, parseXmlBible } from '../lib/bible.js';
 import { admin, sb } from './api.js';
 import { FEATURES } from '../lib/licence.js';
 import { Empty, Seg } from '../ui.jsx';
@@ -209,7 +211,7 @@ function RequestsTab({ onChange }) {
             <b>{money(r.amount, r.currency)}</b>
           </div>
           <div>MoMo transaction: <b className="select-all font-mono">{r.momo_ref}</b> · from <b>{r.phone}</b></div>
-          <div className="text-xs text-stone-500">{PRODUCT[r.product]} · {r.device_code} · {when(r.created_at)}{r.reason ? ` · ${r.reason}` : ''}</div>
+          <div className="text-xs text-stone-500">{r.item_id ? `${r.item_kind === 'bible' ? 'Bible' : 'Background'}: ${r.item_title}` : PRODUCT[r.product]} · {r.device_code} · {when(r.created_at)}{r.reason ? ` · ${r.reason}` : ''}</div>
           {r.status === 'pending' && (
             <div className="flex gap-2 pt-1">
               <button disabled={busy === r.id} onClick={() => act(r.id, () => admin('approveRequest', { id: r.id }), `Approved. ${r.church || r.phone} gets Pro the next time the app is online.`)} className="btn flex-1 bg-green-600 text-white"><Check size={16} /> Approve</button>
@@ -218,6 +220,106 @@ function RequestsTab({ onChange }) {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------------------------------- store
+// A Bible file (XML, or a zip with one XML) becomes the app's own Bible file, gzipped.
+async function bibleFile(file) {
+  let bytes = new Uint8Array(await file.arrayBuffer()), name = file.name;
+  if (/\.zip$/i.test(name)) {
+    const all = unzipSync(bytes, { filter: (e) => /\.xml$/i.test(e.name) && !/(^|\/)(__MACOSX|\.)/.test(e.name) });
+    const first = Object.keys(all).sort()[0];
+    if (!first) throw new Error('No XML Bible inside this zip.');
+    bytes = all[first]; name = first.split('/').pop();
+  }
+  const bible = parseXmlBible(decodeXml(bytes), name);
+  const verses = bible.books.reduce((n, b) => n + (b || []).reduce((m, c) => m + ((c || []).filter(Boolean).length), 0), 0);
+  if (verses < 100) throw new Error('This file has almost no verses. Check it is a Bible XML file.');
+  return { blob: new Blob([gzipSync(new TextEncoder().encode(JSON.stringify(bible)), { level: 9 })]), type: 'bible-json-gz', abbr: bible.abbr, title: bible.name, verses };
+}
+// A small picture for the store list, from a picture or the first second of a video.
+function thumbOf(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const draw = (el, w, h) => { const c = document.createElement('canvas'); c.width = 320; c.height = 180; const g = c.getContext('2d'); const k = Math.max(320 / w, 180 / h); g.drawImage(el, (320 - w * k) / 2, (180 - h * k) / 2, w * k, h * k); URL.revokeObjectURL(url); resolve(c.toDataURL('image/jpeg', 0.7)); };
+    if (/^video\//.test(file.type)) { const v = document.createElement('video'); v.muted = true; v.src = url; v.onloadeddata = () => { v.currentTime = Math.min(1, v.duration / 2 || 0); }; v.onseeked = () => draw(v, v.videoWidth, v.videoHeight); v.onerror = () => resolve(null); }
+    else { const i = new window.Image(); i.onload = () => draw(i, i.naturalWidth, i.naturalHeight); i.onerror = () => resolve(null); i.src = url; }
+  });
+}
+const BLANK = { kind: 'bible', title: '', abbr: '', lang: '', description: '', copyright: '', price: 0, active: true };
+function StoreTab() {
+  const list = useLoad(() => admin('storeItems'), []);
+  const [f, setF] = useState(BLANK);
+  const [file, setFile] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState('');
+  const save = async () => {
+    setMsg(null);
+    try {
+      if (!f.id && !file) throw new Error(`Choose the ${f.kind === 'bible' ? 'Bible XML (or zip)' : 'picture or MP4 video'} first.`);
+      let up = null, thumb;
+      if (file) {
+        setBusy('Reading the file…');
+        if (f.kind === 'bible') up = await bibleFile(file);
+        else {
+          if (!/^(image\/(jpeg|png)|video\/mp4)$/.test(file.type)) throw new Error('Backgrounds: JPG, PNG or MP4.');
+          if (file.size > 45e6) throw new Error('Keep background files under 45 MB.');
+          up = { blob: file, type: file.type }; thumb = await thumbOf(file);
+        }
+      }
+      setBusy('Saving…');
+      const meta = { ...f, title: f.title || up?.title || '', abbr: f.abbr || up?.abbr || '', price: Number(f.price) || 0, thumb };
+      const { id } = await admin('storeSave', meta);
+      if (up) {
+        setBusy('Uploading…');
+        const u = await admin('storeUploadUrl', { id, type: up.type });
+        const r = await fetch(u.url, { method: 'PUT', headers: { 'Content-Type': f.kind === 'bible' ? 'application/gzip' : up.type }, body: up.blob });
+        if (!r.ok) throw new Error('The upload failed. Check the internet and try again.');
+        await admin('storeFileDone', { id, path: u.path, type: up.type, size: up.blob.size });
+      }
+      setMsg({ text: `Saved${up?.verses ? ` (${up.verses.toLocaleString()} verses)` : ''}. ${meta.active ? 'Churches see it in the store now.' : 'Hidden until you tick "Show in the store".'}` });
+      setF(BLANK); setFile(null); list.reload();
+    } catch (e) { setMsg({ text: e.message, bad: true }); } finally { setBusy(''); }
+  };
+  return (
+    <div className="space-y-4">
+      <section className="card space-y-2 p-4">
+        <div className="label">{f.id ? 'Edit item' : 'Add to the store'}</div>
+        {!f.id && <Seg label="Item kind" value={f.kind} onChange={(kind) => { setF({ ...f, kind }); setFile(null); }} options={[['bible', 'Bible'], ['background', 'Background']]} />}
+        <label className="block text-xs font-semibold">{f.kind === 'bible' ? 'Bible file (XML, or zip with one XML)' : 'Picture (JPG/PNG) or MP4 video'}{f.id ? ' — only to replace it' : ''}
+          <input type="file" className="mt-1 block w-full text-sm" accept={f.kind === 'bible' ? '.xml,.zip' : 'image/jpeg,image/png,video/mp4'} onChange={(e) => setFile(e.target.files[0] || null)} aria-label="Store file" /></label>
+        <input className="field" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder={f.kind === 'bible' ? 'Title, e.g. Twi Bible (1964) — or leave empty to use the file’s' : 'Title, e.g. Golden cross'} aria-label="Item title" />
+        {f.kind === 'bible' && <div className="grid grid-cols-2 gap-2">
+          <input className="field" value={f.abbr} onChange={(e) => setF({ ...f, abbr: e.target.value })} placeholder="Short name, e.g. TWI" aria-label="Short name" />
+          <input className="field" value={f.lang} onChange={(e) => setF({ ...f, lang: e.target.value })} placeholder="Language" aria-label="Language" />
+        </div>}
+        <input className="field" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="Description (optional)" aria-label="Description" />
+        {f.kind === 'bible' && <input className="field" value={f.copyright} onChange={(e) => setF({ ...f, copyright: e.target.value })} placeholder="Copyright / licence, e.g. Public domain, or © Bible Society of Ghana, used with permission" aria-label="Copyright" />}
+        <label className="block text-xs font-semibold">Price in GH₵ (0 = free, per church)<input className="field mt-1" type="number" min="0" value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} aria-label="Item price" /></label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} className="h-4 w-4 accent-green-600" aria-label="Show in the store" />Show in the store</label>
+        {f.kind === 'bible' && <p className="text-xs text-amber-700 dark:text-amber-400">Only upload Bibles you are allowed to share or sell (public domain, or with the publisher’s written permission).</p>}
+        <div className="flex gap-2">
+          <button onClick={save} disabled={!!busy} className="btn flex-1 bg-green-600 text-white"><Upload size={16} /> {busy || (f.id ? 'Save changes' : 'Upload')}</button>
+          {f.id && <button onClick={() => { setF(BLANK); setFile(null); }} className="btn-soft">Cancel</button>}
+        </div>
+        <Msg m={msg} />
+      </section>
+      <section className="space-y-2">
+        <div className="label">In the store</div>
+        {list.data && !list.data.length && <Empty>Nothing yet.</Empty>}
+        {list.data?.map((it) => (
+          <div key={it.id} className="card flex items-center gap-3 p-3 text-sm">
+            {it.thumb ? <img src={it.thumb} alt="" className="h-10 w-16 rounded object-cover" /> : <span className="grid h-10 w-16 place-items-center rounded bg-gold-500/15 text-xs font-bold">{it.abbr || 'BIBLE'}</span>}
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-bold">{it.title}</div>
+              <div className="text-xs text-stone-500">{it.price ? money(it.price, it.currency) : 'Free'} · {it.active ? 'showing' : 'hidden'}{it.file_path ? '' : ' · no file yet!'}</div>
+            </div>
+            <button onClick={() => { setF({ ...BLANK, ...it, abbr: it.abbr || '', lang: it.lang || '', description: it.description || '', copyright: it.copyright || '' }); setFile(null); window.scrollTo(0, 0); }} className="btn-soft min-h-9 px-3 text-sm">Edit</button>
+          </div>
+        ))}
+      </section>
     </div>
   );
 }
@@ -325,7 +427,7 @@ function SettingsTab() {
 }
 
 // ------------------------------------------------------------------------------------------- shell
-const TABS = [['home', 'Home', Home], ['requests', 'Requests', Inbox], ['licences', 'Licences', KeyRound], ['codes', 'Codes', Ticket], ['settings', 'Settings', Settings]];
+const TABS = [['home', 'Home', Home], ['requests', 'Requests', Inbox], ['store', 'Store', ShoppingBag], ['licences', 'Licences', KeyRound], ['codes', 'Codes', Ticket], ['settings', 'Settings', Settings]];
 
 export default function AdminApp() {
   const [session, setSession] = useState(undefined);
@@ -363,6 +465,7 @@ export default function AdminApp() {
           <>
             {tab === 'home' && <HomeTab go={setTab} onCount={setWaiting} />}
             {tab === 'requests' && <RequestsTab onChange={countWaiting} />}
+            {tab === 'store' && <StoreTab />}
             {tab === 'licences' && <LicencesTab />}
             {tab === 'codes' && <CodesTab />}
             {tab === 'settings' && <SettingsTab />}
@@ -370,7 +473,7 @@ export default function AdminApp() {
         )}
       </main>
       {claim.ok && (
-        <nav className="grid grid-cols-5 border-t border-paper-200 bg-white pb-[env(safe-area-inset-bottom)] dark:border-night-700 dark:bg-night-900">
+        <nav className="grid grid-cols-6 border-t border-paper-200 bg-white pb-[env(safe-area-inset-bottom)] dark:border-night-700 dark:bg-night-900">
           {TABS.map(([id, label, Icon]) => (
             <button key={id} onClick={() => setTab(id)} className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-semibold ${tab === id ? 'text-green-600' : 'text-stone-500 dark:text-stone-400'}`}><span className="relative"><Icon size={20} />{id === 'requests' && waiting > 0 && <span className="absolute -right-2.5 -top-1.5 min-w-4 rounded-full bg-red-600 px-1 text-[10px] leading-4 text-white">{waiting}</span>}</span>{label}</button>
           ))}

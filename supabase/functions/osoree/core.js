@@ -199,11 +199,13 @@ async function redeem(d, { device, code }) {
 }
 
 /** Restore step 1: an SMS code to the phone number given when paying. */
-async function restoreStart(d, { phone }) {
+async function restoreStart(d, { phone, purpose }) {
   const ph = phoneOf(phone);
   need(ph, 'Enter the phone number used when paying.');
-  const has = await d.query("select 1 from licences where phone = $1 and status = 'active' limit 1", [ph]);
-  need(has.length, 'No Pro purchase was found for this phone number. Check the number, or contact your dealer.', 404);
+  const has = purpose === 'store'
+    ? await d.query("select 1 from licence_requests where phone = $1 and status = 'approved' and item_id is not null limit 1", [ph])
+    : await d.query("select 1 from licences where phone = $1 and status = 'active' limit 1", [ph]);
+  need(has.length, purpose === 'store' ? 'No store purchases were found for this phone number.' : 'No Pro purchase was found for this phone number. Check the number, or contact your dealer.', 404);
   const key = d.env('MNOTIFY_KEY');
   need(key, 'Restoring by SMS is not set up yet. Contact your dealer to move your licence.', 503);
   const code = String(Math.floor(100000 + Math.random() * 900000));
@@ -340,14 +342,19 @@ const ADMIN = {
   async codes(d) { return d.query('select * from activation_codes order by created_at desc limit 300'); },
   async requests(d, b) {
     const st = ['pending', 'approved', 'declined'].includes(b.status) ? b.status : null;
-    const rows = st ? await d.query('select * from licence_requests where status = $1 order by created_at desc limit 200', [st])
-      : await d.query("select * from licence_requests where status <> 'replaced' order by created_at desc limit 200");
+    const q = 'select r.*, i.title item_title, i.kind item_kind from licence_requests r left join store_items i on i.id = r.item_id';
+    const rows = st ? await d.query(`${q} where r.status = $1 order by r.created_at desc limit 200`, [st])
+      : await d.query(`${q} where r.status <> 'replaced' order by r.created_at desc limit 200`);
     return rows.map((r) => ({ ...r, amount: Number(r.amount) }));
   },
   async approveRequest(d, b) {
     const [r] = await d.query('select * from licence_requests where id = $1', [b.id]);
     need(r, 'Request not found.', 404);
     need(r.status === 'pending', `This request is already ${r.status}.`);
+    if (r.item_id) {
+      await d.query("update licence_requests set status = 'approved', decided_at = now() where id = $1", [r.id]);
+      return { ok: true };
+    }
     const lic = await issue(d, { device: r.device_code, product: r.product, church: r.church, phone: r.phone, source: 'request', sourceRef: r.id });
     await d.query("update licence_requests set status = 'approved', licence_id = $2, decided_at = now() where id = $1", [r.id, lic.id]);
     return { ok: true, licence: lic.token, id: lic.id };
@@ -359,6 +366,34 @@ const ADMIN = {
     await d.query("update licence_requests set status = 'declined', reason = $2, decided_at = now() where id = $1", [b.id, String(b.reason || '').trim().slice(0, 200) || null]);
     return { ok: true };
   },
+  async storeItems(d) { return (await d.query('select * from store_items order by kind, sort, created_at desc')).map((i) => ({ ...i, price: Number(i.price), file_size: Number(i.file_size || 0) })); },
+  async storeSave(d, b) {
+    need(['bible', 'background'].includes(b.kind), 'Kind: bible or background.');
+    need(String(b.title || '').trim(), 'Give the item a title.');
+    need(Number(b.price) >= 0 && Number(b.price) < 100000, 'Bad price.');
+    const id = b.id || (b.kind === 'bible' ? 'B' : 'G') + d.random(9);
+    const f = { title: String(b.title).trim().slice(0, 80), abbr: b.abbr ? String(b.abbr).trim().slice(0, 16) : null, lang: b.lang ? String(b.lang).slice(0, 40) : null,
+      description: b.description ? String(b.description).slice(0, 300) : null, copyright: b.copyright ? String(b.copyright).slice(0, 300) : null, price: Number(b.price) || 0,
+      thumb: b.thumb && String(b.thumb).startsWith('data:image/') && b.thumb.length < 200000 ? b.thumb : null, active: !!b.active, sort: Number(b.sort) || 0 };
+    await d.query(`insert into store_items (id, kind, title, abbr, lang, description, copyright, price, thumb, active, sort) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      on conflict (id) do update set title = $3, abbr = $4, lang = $5, description = $6, copyright = $7, price = $8, thumb = coalesce($9, store_items.thumb), active = $10, sort = $11`,
+      [id, b.kind, f.title, f.abbr, f.lang, f.description, f.copyright, f.price, f.thumb, f.active, f.sort]);
+    return { id };
+  },
+  /** Where the admin app uploads the item's file (a one-time signed address in the private bucket). */
+  async storeUploadUrl(d, b) {
+    const [item] = await d.query('select id, kind from store_items where id = $1', [b.id]);
+    need(item, 'Save the item first.', 404);
+    const ext = item.kind === 'bible' ? 'json.gz' : /^video\//.test(b.type) ? 'mp4' : /png/.test(b.type) ? 'png' : 'jpg';
+    const path = `${item.kind}/${item.id}-${d.random(6)}.${ext}`;
+    return { path, ...(await d.storage.signUpload(path)) };
+  },
+  async storeFileDone(d, b) {
+    need(b.path && /^(bible|background)\/[A-Z0-9]+-[A-Z0-9]+\.(json\.gz|mp4|png|jpg)$/.test(b.path), 'Bad file.');
+    await d.query('update store_items set file_path = $2, file_type = $3, file_size = $4 where id = $1', [b.id, b.path, String(b.type || '').slice(0, 40), Number(b.size) || 0]);
+    return { ok: true };
+  },
+  async storeDelete(d, b) { await d.query('update store_items set active = false where id = $1', [b.id]); return { ok: true }; },
   async smsLog(d) { return d.query('select phone, ok, reply, created_at from sms_log order by id desc limit 50'); },
   async recent(d) {
     return {
@@ -371,32 +406,79 @@ const ADMIN = {
 // ----------------------------------------------------------------------------------------------- licence requests
 
 /** A church that paid by Mobile Money asks for Pro; the Super Admin approves it in the admin app. */
-async function request(d, { device, product, phone, church, momoRef, note }) {
+async function request(d, { device, product, phone, church, momoRef, note, itemId }) {
   need(DEVICE.test(device || ''), 'Bad device code.');
-  need(PRODUCTS[product], 'Choose Pro or Pro for one year.');
+  let item = null;
+  if (itemId) {
+    [item] = await d.query('select * from store_items where id = $1 and active', [itemId]);
+    need(item, 'This item is no longer in the store.', 404);
+    need(Number(item.price) > 0, 'This item is free: just download it.');
+    product = 'item';
+  } else need(PRODUCTS[product], 'Choose Pro or Pro for one year.');
   const ph = phoneOf(phone);
   need(ph, 'Enter the phone number you paid from.');
   const ref = String(momoRef || '').trim();
   need(ref.length >= 4 && ref.length <= 40, 'Enter the MoMo transaction ID from the payment message.');
   const s = await settings(d);
-  const amount = Number(s.prices?.[product]);
+  const amount = item ? Number(item.price) : Number(s.prices?.[product]);
   need(amount > 0, 'This product is not on sale yet.');
   const recent = await d.query("select count(*)::int n from licence_requests where device_code = $1 and created_at > now() - interval '1 day'", [device]);
-  need(recent[0].n < 10, 'Too many requests today. Call the help line.', 429);
-  await d.query("update licence_requests set status = 'replaced', decided_at = now() where device_code = $1 and status = 'pending'", [device]);
+  need(recent[0].n < 20, 'Too many requests today. Call the help line.', 429);
+  await d.query("update licence_requests set status = 'replaced', decided_at = now() where device_code = $1 and status = 'pending' and coalesce(item_id, '') = $2", [device, itemId || '']);
   const id = 'R' + d.random(10);
-  await d.query('insert into licence_requests (id, device_code, product, amount, currency, phone, church, momo_ref, note) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
-    [id, device, product, amount, s.currency || 'GHS', ph, String(church || '').trim().slice(0, 80) || null, ref, String(note || '').trim().slice(0, 200) || null]);
+  await d.query('insert into licence_requests (id, device_code, product, amount, currency, phone, church, momo_ref, note, item_id) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+    [id, device, product, amount, s.currency || 'GHS', ph, String(church || '').trim().slice(0, 80) || null, ref, String(note || '').trim().slice(0, 200) || null, itemId || null]);
+  await d.query('insert into device_phones (device_code, phone) values ($1, $2) on conflict do nothing', [device, ph]);
   return { id, status: 'pending' };
 }
 
 /** The newest request from this device, and its licence once approved. */
 async function requestStatus(d, { device }) {
   need(DEVICE.test(device || ''), 'Bad device code.');
-  const [r] = await d.query('select id, product, amount, currency, momo_ref, status, reason, created_at from licence_requests where device_code = $1 order by created_at desc limit 1', [device]);
+  const [r] = await d.query('select id, product, amount, currency, momo_ref, status, reason, created_at from licence_requests where device_code = $1 and item_id is null order by created_at desc limit 1', [device]);
   if (!r) return { status: 'none' };
   const l = r.status === 'approved' ? await activeLicence(d, device) : null;
   return { ...r, amount: Number(r.amount), licence: l?.token || null };
+}
+
+// ----------------------------------------------------------------------------------------------- store
+
+const ITEM_COLS = 'id, kind, title, abbr, lang, description, copyright, price, currency, file_type, file_size, thumb, sort';
+/** Items this device may download: free ones, and paid ones approved for any phone number linked to it. */
+async function owned(d, device) {
+  const rows = await d.query(`select distinct r.item_id from licence_requests r join device_phones p on p.phone = r.phone
+    where p.device_code = $1 and r.status = 'approved' and r.item_id is not null`, [device]);
+  return rows.map((r) => r.item_id);
+}
+async function store(d, { device }) {
+  need(DEVICE.test(device || ''), 'Bad device code.');
+  const items = (await d.query(`select ${ITEM_COLS} from store_items where active order by kind, sort, title`)).map((i) => ({ ...i, price: Number(i.price), file_size: Number(i.file_size || 0) }));
+  const pending = (await d.query("select item_id from licence_requests where device_code = $1 and status = 'pending' and item_id is not null", [device])).map((r) => r.item_id);
+  const declined = await d.query("select distinct on (item_id) item_id, status, reason from licence_requests where device_code = $1 and item_id is not null order by item_id, created_at desc", [device]);
+  const phones = (await d.query('select phone from device_phones where device_code = $1', [device])).map((r) => r.phone);
+  return { items, owned: await owned(d, device), pending, declined: declined.filter((x) => x.status === 'declined').map((x) => ({ id: x.item_id, reason: x.reason })), phones };
+}
+async function storeDownload(d, { device, itemId }) {
+  need(DEVICE.test(device || ''), 'Bad device code.');
+  const [item] = await d.query('select * from store_items where id = $1 and active', [itemId]);
+  need(item && item.file_path, 'This item is not in the store.', 404);
+  need(Number(item.price) === 0 || (await owned(d, device)).includes(item.id), 'Buy this item first.', 403);
+  return { url: await d.storage.signDownload(item.file_path), item: { id: item.id, kind: item.kind, title: item.title, abbr: item.abbr, file_type: item.file_type, copyright: item.copyright } };
+}
+/** Another phone of the same church: confirm the number by SMS code, then it gets the church's purchases. */
+async function storeLink(d, { phone, code, device }) {
+  need(DEVICE.test(device || ''), 'Bad device code.');
+  const ph = phoneOf(phone);
+  const [rc] = await d.query('select * from restore_codes where phone = $1', [ph]);
+  need(rc && new Date(rc.expires_at) > d.now(), 'The code has expired. Ask for a new one.');
+  need(rc.attempts < 5, 'Too many wrong codes. Ask for a new one.');
+  if ((await d.sha256(ph + ':' + String(code || '').trim())) !== rc.code_hash) {
+    await d.query('update restore_codes set attempts = attempts + 1 where phone = $1', [ph]);
+    throw new Fail('That code is not right.');
+  }
+  await d.query('delete from restore_codes where phone = $1', [ph]);
+  await d.query('insert into device_phones (device_code, phone) values ($1, $2) on conflict do nothing', [device, ph]);
+  return { owned: await owned(d, device) };
 }
 
 /** One entry point: route, body, the signed-in user (admin routes) and the raw request bits (webhooks). */
@@ -413,6 +495,9 @@ export async function handle(d, route, body = {}, extra = {}) {
     case 'test-pay': return testPay(d, body);
     case 'request': return request(d, body);
     case 'request-status': return requestStatus(d, body);
+    case 'store': return store(d, body);
+    case 'store-download': return storeDownload(d, body);
+    case 'store-link': return storeLink(d, body);
     default: {
       const m = /^admin\/(\w+)$/.exec(route);
       if (m && ADMIN[m[1]]) {
