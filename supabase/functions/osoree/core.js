@@ -211,7 +211,12 @@ async function restoreStart(d, { phone }) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ recipient: [ph], sender: s.smsSender || 'Osoree', message: `Your Ɔsɔreɛ Plus restore code is ${code}. It expires in 10 minutes.`, is_schedule: false, schedule_date: '' }),
   });
-  if (!r.ok) throw new Fail('The SMS could not be sent. Try again in a moment.', 502);
+  // mNotify answers 200 even when it refuses (no credit, sender ID not approved): read its status.
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || (j.status && j.status !== 'success') || (j.code && String(j.code) !== '2000')) {
+    await d.query('delete from restore_codes where phone = $1', [ph]);
+    throw new Fail('The SMS could not be sent. Try again later, or contact your dealer.', 502);
+  }
   return { sent: true };
 }
 

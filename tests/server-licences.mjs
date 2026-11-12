@@ -109,7 +109,9 @@ ok('unknown code refused', /not valid/.test((await call('redeem', { device: A, c
 // ---- restore by phone
 ok('restore without SMS set up explains', /not set up/.test((await call('restore-start', { phone: '0240000002' })).error));
 envs.MNOTIFY_KEY = 'mn';
-fakeProvider.fn = () => ({});
+fakeProvider.fn = (u) => (u.includes('mnotify') ? { json: { status: 'error', code: '4005', message: 'Insufficient balance' } } : {});
+ok('SMS refused by mNotify is reported', /could not be sent/.test((await call('restore-start', { phone: '0240000002' })).error));
+fakeProvider.fn = (u) => (u.includes('mnotify') ? { json: { status: 'success', code: '2000' } } : {});
 ok('restore for an unknown number', (await call('restore-start', { phone: '0209999999' })).status === 404);
 await call('restore-start', { phone: '024 000 0002' });
 const code = sent.at(-1).message.match(/\d{6}/)[0];
