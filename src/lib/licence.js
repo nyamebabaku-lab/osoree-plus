@@ -29,6 +29,7 @@ export async function getDeviceCode() {
   if (deviceCodeCache) return deviceCodeCache;
   let raw = '';
   if (IS_NATIVE) raw = (await Screen.getDeviceId().catch(() => ({ id: '' }))).id;
+  else if (window.osoreeDesktop?.deviceId) raw = 'win-' + window.osoreeDesktop.deviceId; // Windows app: this computer's ID
   if (!raw) {
     try { raw = localStorage.getItem('osoree-device-id') || ''; } catch { /* storage blocked */ }
     if (!raw) { raw = 'web-' + Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, '0')).join(''); try { localStorage.setItem('osoree-device-id', raw); } catch { /* ignore */ } }

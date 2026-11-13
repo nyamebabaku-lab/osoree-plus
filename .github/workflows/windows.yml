@@ -1,0 +1,54 @@
+name: Build Windows app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows
+  cancel-in-progress: true
+
+jobs:
+  setup-exe:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build the app (no service worker; every file inside the program)
+        run: VITE_TARGET=app npx vite build
+      - name: Package the Windows setup file
+        run: |
+          V=$(node -p "require('./package.json').version")
+          rm -rf desktop/app && cp -r dist-app desktop/app && cp desktop/build/icon.png desktop/app/icon.png
+          cd desktop
+          npm pkg set version=$V
+          npm install --no-audit --no-fund
+          npx electron-builder --win nsis --x64 --publish never
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OsoreePlus-Setup
+          path: desktop/out/*.exe
+      - name: Attach to the release (wait for the Android job to create it)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(node -p "require('./package.json').version")
+          for i in $(seq 1 30); do gh release view "v$V" >/dev/null 2>&1 && break; sleep 20; done
+          if gh release view "v$V" >/dev/null 2>&1; then
+            cp desktop/out/OsoreePlus-Setup-$V.exe OsoreePlus-Setup.exe
+            gh release upload "v$V" OsoreePlus-Setup.exe --clobber
+          else
+            gh release create "v$V" desktop/out/OsoreePlus-Setup-$V.exe --title "Ɔsɔreɛ Plus $V"
+          fi

@@ -1,0 +1,49 @@
+{
+  "name": "osoree-plus-desktop",
+  "productName": "Ɔsɔreɛ Plus",
+  "version": "1.7.0",
+  "description": "Ɔsɔreɛ Plus for Windows: project Bible verses, songs, pictures, videos and documents to a projector or TV",
+  "author": "Brands Media",
+  "main": "main.cjs",
+  "private": true,
+  "scripts": {
+    "dist": "electron-builder --win nsis --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.osoree.plus.desktop",
+    "productName": "Ɔsɔreɛ Plus",
+    "executableName": "OsoreePlus",
+    "artifactName": "OsoreePlus-Setup-${version}.${ext}",
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "app/**/*"
+    ],
+    "directories": {
+      "output": "out",
+      "buildResources": "build"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Ɔsɔreɛ Plus",
+      "uninstallDisplayName": "Ɔsɔreɛ Plus",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
+    }
+  },
+  "allowScripts": {
+    "electron@33.2.1": true
+  }
+}
