@@ -2,7 +2,7 @@ name: Build iPhone app
 
 on:
   push:
-    branches: [main, ios-dev]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
