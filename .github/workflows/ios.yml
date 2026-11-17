@@ -22,6 +22,8 @@ jobs:
       - name: Build the app and the iPhone project
         run: |
           VITE_TARGET=app npx vite build
+          mkdir -p $RUNNER_TEMP/empty-specs && cd $RUNNER_TEMP/empty-specs && git init -q && git -c user.email=ci@osoree -c user.name=ci commit -q --allow-empty -m empty && cd -
+          export PODS_SOURCE="file://$RUNNER_TEMP/empty-specs"
           npx cap sync ios
       - name: Compile for the iPhone simulator (no Apple account needed)
         run: |
@@ -77,7 +79,8 @@ jobs:
         run: |
           npm ci
           VITE_TARGET=app npx vite build
-          npx cap sync ios
+          mkdir -p $RUNNER_TEMP/empty-specs && cd $RUNNER_TEMP/empty-specs && git init -q && git -c user.email=ci@osoree -c user.name=ci commit -q --allow-empty -m empty && cd -
+          PODS_SOURCE="file://$RUNNER_TEMP/empty-specs" npx cap sync ios
           mkdir -p ~/private_keys && echo "$ASC_KEY_P8" > ~/private_keys/AuthKey_$ASC_KEY_ID.p8
           V=$(node -p "require('./package.json').version")
           AUTH="-authenticationKeyPath $HOME/private_keys/AuthKey_$ASC_KEY_ID.p8 -authenticationKeyID $ASC_KEY_ID -authenticationKeyIssuerID $ASC_ISSUER_ID"

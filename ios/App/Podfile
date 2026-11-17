@@ -1,3 +1,6 @@
+# CI can point CocoaPods at an empty local spec repo: every pod here comes from node_modules, none from the online catalogue.
+source ENV['PODS_SOURCE'] if ENV['PODS_SOURCE']
+
 require_relative '../../node_modules/@capacitor/ios/scripts/pods_helpers'
 
 platform :ios, '15.0'
