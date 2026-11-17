@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff, Radio, RefreshCw, Square } from 'lucide-react';
 import { useStore } from '../store.js';
-import { IS_NATIVE, Screen } from '../lib/output.js';
+import { IS_IOS, IS_NATIVE, Screen } from '../lib/output.js';
 import { Seg } from '../ui.jsx';
 import { ProLock } from '../Pro.jsx';
 
@@ -47,7 +47,7 @@ function TargetCard({ t, n, disabled }) {
 
 // Phone app only (the browser has no stream encoder): the laptop route is OBS.
 export function GoLiveSection() {
-  return IS_NATIVE ? <GoLivePanel /> : null;
+  return IS_NATIVE && !IS_IOS ? <GoLivePanel /> : null; // iPhone: streaming comes later (OBS guide meanwhile)
 }
 
 function GoLivePanel() {
@@ -162,7 +162,7 @@ function GoLivePanel() {
 
 // Streaming from a laptop with OBS Studio (free), using the overlay above.
 export function ObsGuide() {
-  const [open, setOpen] = useState(!IS_NATIVE);
+  const [open, setOpen] = useState(!IS_NATIVE || IS_IOS);
   return (
     <section className="card space-y-3 p-4">
       <button onClick={() => setOpen(!open)} className="flex w-full items-center justify-between">

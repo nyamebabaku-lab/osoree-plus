@@ -5,6 +5,7 @@ import { api } from './lib/server.js';
 import { install, installedIds, loadStore, syncStore } from './lib/store-client.js';
 import { Empty, Seg, Sheet } from './ui.jsx';
 import { askNotifications } from './lib/notify.js';
+import { IS_IOS } from './lib/output.js';
 
 const money = (cur, n) => `${cur === 'GHS' ? 'GH₵' : (cur || '') + ' '}${Number(n).toLocaleString()}`;
 const mb = (n) => (n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB');
@@ -88,7 +89,8 @@ export default function StoreSheet({ onClose }) {
     try { await install(it); setNote({ text: it.kind === 'bible' ? `${it.abbr || it.title} is ready: choose it in the Bible version list.` : `${it.title} is in Media and in Screen → Text background.` }); await loadStore().then(setData); }
     catch (e) { setNote({ text: e.message, bad: true }); } finally { setWorking(''); }
   };
-  const items = data?.items.filter((i) => i.kind === kind) || [];
+  // iPhone (App Store rules): free items and what the church already owns; paid items are bought on other devices.
+  const items = data?.items.filter((i) => i.kind === kind && (!IS_IOS || i.price === 0 || data.owned.includes(i.id))) || [];
   return (
     <Sheet title="Store" onClose={onClose}>
       <div className="space-y-3">

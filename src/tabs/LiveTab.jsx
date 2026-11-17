@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Copy, ListPlus, Pencil, Plus, RefreshCw, Smartphone, Trash2, UserRound, Video, VideoOff } from 'lucide-react';
 import { useStore, DEFAULT_LT } from '../store.js';
-import { IS_NATIVE, Screen } from '../lib/output.js';
+import { IS_IOS, IS_NATIVE, Screen } from '../lib/output.js';
 import { FONTS } from '../lib/fonts.js';
 import { slideKey } from '../lib/slides.js';
 import { Empty, Seg, Sheet } from '../ui.jsx';
@@ -85,7 +85,7 @@ function CameraSection() {
 
       {IS_NATIVE ? (
         <>
-          <Row label="Camera"><Seg label="Camera source" value={remote ? 'remote' : 'phone'} onChange={(v) => setCam({ source: v })} options={[['phone', 'This phone'], ['remote', 'Another phone']]} /></Row>
+          {!IS_IOS && <Row label="Camera"><Seg label="Camera source" value={remote ? 'remote' : 'phone'} onChange={(v) => setCam({ source: v })} options={[['phone', 'This phone'], ['remote', 'Another phone']]} /></Row>}
           {!remote && <Row label="Phone camera"><Seg label="Phone camera" value={cam.facing} onChange={(facing) => setCam({ facing })} options={[['environment', 'Back'], ['user', 'Front']]} /></Row>}
           {!remote && cam.on && <PhoneCamStatus />}
           {remote && (
@@ -310,7 +310,7 @@ export default function LiveTab({ onCameraMode }) {
       <WatermarkSection />
       <OverlaySection />
       <ObsGuide />
-      <CameraDeviceSection onCameraMode={onCameraMode} />
+      {!IS_IOS && <CameraDeviceSection onCameraMode={onCameraMode} />}
     </div>
   );
 }

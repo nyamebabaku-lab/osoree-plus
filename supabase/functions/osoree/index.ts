@@ -5,6 +5,8 @@
 //   GET  /osoree/done, /osoree/test-pay?ref=    small pages shown in the phone's browser after paying
 import postgres from 'npm:postgres@3.4.5';
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
+import * as x509 from 'npm:@peculiar/x509@1.12.3';
+import { appleVerifier } from './apple.js';
 import * as ed from 'npm:@noble/ed25519@3.2.0';
 import { sha512 } from 'npm:@noble/hashes@2.4.0/sha2.js';
 import { ALPHABET, Fail, handle } from './core.js';
@@ -35,6 +37,7 @@ const storage = {
 };
 const deps = {
   storage,
+  apple: appleVerifier(x509),
   query: (text: string, params: unknown[] = []) => sql.unsafe(text, params as never[]),
   now: () => new Date(),
   async sign(payload: unknown) {

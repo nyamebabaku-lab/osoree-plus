@@ -3,7 +3,7 @@ import { Check, Copy, CreditCard, KeyRound, Lock, Phone, Ticket } from 'lucide-r
 import { useStore } from './store.js';
 import { DEFAULT_POLICY, FEATURES, checkLicence, getDeviceCode, isUnlocked, licenceId, licenceStatus } from './lib/licence.js';
 import { api, openCheckout } from './lib/server.js';
-import { IS_NATIVE } from './lib/output.js';
+import { IS_IOS, IS_NATIVE, Screen } from './lib/output.js';
 import { Sheet } from './ui.jsx';
 import { syncStore } from './lib/store-client.js';
 import { askNotifications, notify } from './lib/notify.js';
@@ -257,6 +257,46 @@ function MomoRequest({ product }) {
   );
 }
 
+// iPhone: Pro through the App Store (Apple's rules); our server turns Apple's signed purchase into the licence.
+export const APPLE_IDS = { pro: 'com.osoree.plus.pro', year: 'com.osoree.plus.pro.year' };
+function AppleBuy({ onDone }) {
+  const { deviceCode, setLicence } = useStore();
+  const [products, setProducts] = useState(null);
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState(null);
+  useEffect(() => { Screen.iapProducts({ ids: Object.values(APPLE_IDS) }).then((r) => setProducts(r.products)).catch((e) => setMsg({ text: e.message, bad: true })); }, []);
+  const claim = async (jws) => { const r = await api('apple', { device: deviceCode, jws }); setLicence(r.licence); return r; };
+  const buy = async (id) => {
+    setMsg(null); setBusy(id);
+    try { const { jws } = await Screen.iapBuy({ id }); await claim(jws); setMsg({ text: 'Thank you! Pro is on.' }); setTimeout(onDone, 1200); }
+    catch (e) { if (!/cancel/i.test(e?.message || '')) setMsg({ text: e.message, bad: true }); } finally { setBusy(''); }
+  };
+  const restore = async () => {
+    setMsg(null); setBusy('restore');
+    try {
+      const { transactions } = await Screen.iapRestore();
+      let got = false;
+      for (const jws of transactions) { try { await claim(jws); got = true; } catch { /* ended or another app */ } }
+      setMsg(got ? { text: 'Pro restored.' } : { text: 'No Pro purchase was found for this Apple ID.', bad: true });
+    } catch (e) { setMsg({ text: e.message, bad: true }); } finally { setBusy(''); }
+  };
+  const order = [[APPLE_IDS.pro, 'Pro for this iPhone', 'Pay once, no end date'], [APPLE_IDS.year, 'Pro for one year', 'Pay once for 12 months']];
+  return (
+    <div className="space-y-2">
+      {!products && !msg && <p className="text-sm text-stone-500">Opening the App Store…</p>}
+      {products && !products.length && <p className="text-sm text-stone-500">Pro is not available in the App Store yet.</p>}
+      {order.map(([id, title, sub]) => { const p = products?.find((x) => x.id === id); return p && (
+        <button key={id} onClick={() => buy(id)} disabled={!!busy} className="flex w-full items-center gap-3 rounded-xl bg-paper-100 p-3 text-left ring-1 ring-green-600/40 dark:bg-night-800">
+          <span className="flex-1"><span className="block text-sm font-bold">{title}</span><span className="block text-xs text-stone-500 dark:text-stone-400">{sub}</span></span>
+          <span className="text-base font-extrabold">{busy === id ? '…' : p.price}</span>
+        </button>
+      ); })}
+      <button onClick={restore} disabled={!!busy} className="btn-soft w-full text-sm">{busy === 'restore' ? 'Restoring…' : 'Restore purchases'}</button>
+      {msg && <p role={msg.bad ? 'alert' : 'status'} className={`text-sm ${msg.bad ? 'text-red-600 dark:text-red-400' : 'text-green-700 dark:text-green-400'}`}>{msg.text}</p>}
+    </div>
+  );
+}
+
 function CodeSection() {
   const { deviceCode, setLicence } = useStore();
   const [code, setCode] = useState('');
@@ -321,17 +361,23 @@ export function Paywall() {
         </div>
         {!done && (
           <>
-            <div className="space-y-2"><div className="label">Buy Pro</div><BuySection /></div>
-            <div className="space-y-2"><div className="label">Have an activation code?</div><CodeSection /></div>
+            {IS_IOS ? (
+              <div className="space-y-2"><div className="label">Buy Pro</div><AppleBuy onDone={close} /></div>
+            ) : (
+              <>
+                <div className="space-y-2"><div className="label">Buy Pro</div><BuySection /></div>
+                <div className="space-y-2"><div className="label">Have an activation code?</div><CodeSection /></div>
+              </>
+            )}
             <div className="space-y-2"><div className="label">Restore Pro</div><RestoreSection /></div>
-            <details className="rounded-xl bg-paper-100 p-3 dark:bg-night-800">
+            {!IS_IOS && <details className="rounded-xl bg-paper-100 p-3 dark:bg-night-800">
               <summary className="cursor-pointer text-sm font-semibold">Got a licence code from your dealer?</summary>
               <div className="mt-3 space-y-2">
                 <div className="label">This device’s code</div>
                 <DeviceCode />
                 <LicenceEntry onDone={close} />
               </div>
-            </details>
+            </details>}
             {useStore.getState().policy?.dealer && <p className="text-xs text-stone-500 dark:text-stone-400">Help: {useStore.getState().policy.dealer}</p>}
           </>
         )}

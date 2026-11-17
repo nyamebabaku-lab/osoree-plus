@@ -1,0 +1,49 @@
+name: Build iPhone app
+
+on:
+  push:
+    branches: [main, ios-dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ios
+  cancel-in-progress: true
+
+jobs:
+  simulator:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build the app and the iPhone project
+        run: |
+          VITE_TARGET=app npx vite build
+          npx cap sync ios
+      - name: Compile for the iPhone simulator (no Apple account needed)
+        run: |
+          xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tail -40
+          ls build/Build/Products/Debug-iphonesimulator/
+      - name: Open it in a simulator and take pictures
+        run: |
+          DEV=$(xcrun simctl list devices available | grep -m1 -E "iPhone 1[45] \(" | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')
+          echo "Simulator $DEV"
+          xcrun simctl boot "$DEV"
+          xcrun simctl bootstatus "$DEV" -b
+          xcrun simctl install "$DEV" build/Build/Products/Debug-iphonesimulator/App.app
+          xcrun simctl launch "$DEV" com.osoree.plus
+          sleep 25
+          mkdir -p shots
+          xcrun simctl io "$DEV" screenshot shots/1-start.png
+          xcrun simctl spawn "$DEV" log show --last 2m --predicate 'process == "App"' --style compact 2>/dev/null | grep -iE "error|⚡️|capacitor|ScreenPlugin" | tail -60 > shots/log.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iphone-simulator
+          path: |
+            shots/
+            build/Build/Products/Debug-iphonesimulator/App.app

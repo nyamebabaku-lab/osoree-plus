@@ -3,6 +3,7 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 
 export const IS_NATIVE = Capacitor.isNativePlatform();
+export const IS_IOS = IS_NATIVE && Capacitor.getPlatform() === 'ios'; // App Store rules: Apple purchase only, no Wi-Fi screens yet
 export const Screen = IS_NATIVE ? registerPlugin('Screen') : null;
 
 const KEY = 'osoree-live';

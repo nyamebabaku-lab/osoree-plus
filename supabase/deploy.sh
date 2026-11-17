@@ -35,5 +35,6 @@ echo "3/3 Edge Function"
 curl -sf "${H[@]}" -X POST "$API/functions/deploy?slug=osoree" \
   -F 'metadata={"entrypoint_path":"index.ts","name":"osoree","verify_jwt":false};type=application/json' \
   -F "file=@supabase/functions/osoree/index.ts;filename=index.ts" \
-  -F "file=@supabase/functions/osoree/core.js;filename=core.js" >/dev/null
+  -F "file=@supabase/functions/osoree/core.js;filename=core.js" \
+  -F "file=@supabase/functions/osoree/apple.js;filename=apple.js" >/dev/null
 echo "Done: https://$REF.supabase.co/functions/v1/osoree"

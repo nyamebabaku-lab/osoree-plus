@@ -31,11 +31,11 @@ export async function settings(d) {
 const publicConfig = (s) => ({ trialDays: s.trialDays, pro: s.pro, currency: s.currency, prices: s.prices, provider: s.testMode ? 'test' : s.provider, dealer: s.dealer || '', products: PRODUCTS,
   onlinePay: s.onlinePay !== false, momo: s.momoNumber ? { number: s.momoNumber, name: s.momoName || '', network: s.momoNetwork || '' } : null });
 
-async function issue(d, { device, product, church, phone, source, sourceRef }) {
+async function issue(d, { device, product, church, phone, source, sourceRef, until }) {
   need(PRODUCTS[product], 'Unknown product.');
   const now = d.now();
   const id = 'L' + d.random(10);
-  const expires = product === 'year' ? new Date(now.getTime() + YEAR_MS) : null;
+  const expires = product === 'year' ? (until || new Date(now.getTime() + YEAR_MS)) : null;
   const payload = { v: 1, d: device, p: 'pro', i: Math.floor(now / 1000), e: expires ? Math.floor(expires / 1000) : 0, n: id };
   if (church) payload.c = church;
   if (phone) payload.ph = phone;
@@ -481,6 +481,37 @@ async function storeLink(d, { phone, code, device }) {
   return { owned: await owned(d, device) };
 }
 
+// ----------------------------------------------------------------------------------------------- Apple in-app purchase
+
+export const APPLE_PRODUCTS = { 'com.osoree.plus.pro': 'pro', 'com.osoree.plus.pro.year': 'year' };
+export const APPLE_BUNDLE = 'com.osoree.plus';
+/** iPhone: a StoreKit transaction (signed by Apple) becomes an Ɔsɔreɛ licence for this device. */
+async function apple(d, { device, jws }) {
+  need(DEVICE.test(device || ''), 'Bad device code.');
+  need(d.apple, 'Apple purchases are not set up.', 503);
+  let t;
+  try { t = await d.apple(jws); } catch (e) { throw new Fail(`The App Store purchase could not be checked (${e.message}).`, 400); }
+  need(t.bundleId === APPLE_BUNDLE, 'This purchase is for another app.');
+  const product = APPLE_PRODUCTS[t.productId];
+  need(product, 'Unknown App Store product.');
+  need(!t.revocationDate, 'Apple refunded this purchase.', 403);
+  const ref = 'A' + String(t.originalTransactionId || t.transactionId);
+  const [paid] = await d.query('select * from payments where id = $1', [ref]);
+  if (!paid) {
+    await d.query("insert into payments (id, device_code, product, amount, currency, phone, provider, status, paid_at) values ($1,$2,$3,$4,$5,$6,'apple','paid',now())",
+      [ref, device, product, Number(t.price || 0) / 1000, t.currency || 'USD', '']);
+  }
+  // The same purchase on a new iPhone (Restore purchases): the licence moves with it.
+  const [l] = await d.query("select * from licences where source = 'apple' and source_ref = $1 and status = 'active' order by created_at desc limit 1", [ref]);
+  if (l && l.device_code === device) return { licence: l.token };
+  if (l) await d.query("update licences set status = 'moved' where id = $1", [l.id]);
+  // one year counts from Apple's purchase date (restoring later does not start a new year)
+  const until = product === 'year' ? new Date(Number(t.purchaseDate || t.originalPurchaseDate || d.now().getTime()) + YEAR_MS) : null;
+  need(!until || until > d.now(), 'This one-year purchase has ended. Buy Pro again to continue.', 403);
+  const lic = await issue(d, { device, product, source: 'apple', sourceRef: ref, until });
+  return { licence: lic.token };
+}
+
 /** One entry point: route, body, the signed-in user (admin routes) and the raw request bits (webhooks). */
 export async function handle(d, route, body = {}, extra = {}) {
   switch (route) {
@@ -495,6 +526,7 @@ export async function handle(d, route, body = {}, extra = {}) {
     case 'test-pay': return testPay(d, body);
     case 'request': return request(d, body);
     case 'request-status': return requestStatus(d, body);
+    case 'apple': return apple(d, body);
     case 'store': return store(d, body);
     case 'store-download': return storeDownload(d, body);
     case 'store-link': return storeLink(d, body);

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, ArchiveRestore, Cast, Download, MonitorUp, Trash2, Upload, Wifi } from 'lucide-react';
 import { useStore, DEFAULT_STYLE } from '../store.js';
-import { IS_NATIVE, Screen, openScreenWindow, saveTextFile } from '../lib/output.js';
+import { IS_IOS, IS_NATIVE, Screen, openScreenWindow, saveTextFile } from '../lib/output.js';
 import { BUILTIN, backupData, decodeXml, deleteImported, parseXmlBible, readBackup, saveImported } from '../lib/bible.js';
 import { FONTS } from '../lib/fonts.js';
 import { Seg } from '../ui.jsx';
@@ -60,11 +60,11 @@ function PhoneScreens() {
       <section className="card space-y-3 p-4">
         <div className="label">Projector or TV</div>
         <div className="flex items-center gap-2 text-sm font-semibold"><Dot on={st.display} />{st.display ? `Showing on ${st.displayName || 'the screen'}` : 'No screen connected'}</div>
-        <p className="text-sm text-stone-500 dark:text-stone-400">Plug the phone into the projector with an HDMI adapter, or connect to a wireless display. The verse appears there on its own; this phone keeps the controls.</p>
-        <button onClick={() => run(Screen.openCastSettings())} className="btn-soft w-full"><Cast size={18} /> Connect a wireless display</button>
+        <p className="text-sm text-stone-500 dark:text-stone-400">{IS_IOS ? 'Plug the iPhone into the projector with a Lightning or USB-C to HDMI adapter, or AirPlay to an Apple TV. The verse appears there on its own; this iPhone keeps the controls.' : 'Plug the phone into the projector with an HDMI adapter, or connect to a wireless display. The verse appears there on its own; this phone keeps the controls.'}</p>
+        <button onClick={() => run(Screen.openCastSettings())} className="btn-soft w-full"><Cast size={18} /> {IS_IOS ? 'AirPlay to Apple TV' : 'Connect a wireless display'}</button>
       </section>
 
-      <section className="card space-y-3 p-4">
+      {!IS_IOS && <section className="card space-y-3 p-4">
         <div className="label">Screens over Wi-Fi</div>
         <div className="flex items-center gap-2 text-sm font-semibold"><Dot on={st.server && st.clients > 0} />{!st.server ? 'Off' : st.clients ? `${st.clients} ${st.clients === 1 ? 'screen' : 'screens'} connected` : 'On, waiting for a screen'}</div>
         {st.server && (st.urls.length
@@ -77,7 +77,7 @@ function PhoneScreens() {
           : <p className="text-sm text-red-600 dark:text-red-400">This phone is not on a network. Join a Wi-Fi network or turn on the hotspot.</p>)}
         <button onClick={() => (st.server ? run(Screen.stopServer()) : gate('wifi') && run(Screen.startServer()))} className={`${st.server ? 'btn-soft' : 'btn-gold'} w-full`}><Wifi size={18} /> {st.server ? 'Turn off Wi-Fi screens' : 'Turn on Wi-Fi screens'} <ProLock feature="wifi" /></button>
         {!st.server && <p className="text-sm text-stone-500 dark:text-stone-400">No internet is needed, only a shared Wi-Fi network or this phone's hotspot.</p>}
-      </section>
+      </section>}
       {error && <p className="px-1 text-sm text-red-600 dark:text-red-400">{error}</p>}
     </>
   );
