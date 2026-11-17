@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   simulator:
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,7 +30,7 @@ jobs:
           ls build/Build/Products/Debug-iphonesimulator/
       - name: Open it in a simulator and take pictures
         run: |
-          DEV=$(xcrun simctl list devices available | grep -m1 -E "iPhone 1[45] \(" | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')
+          DEV=$(xcrun simctl list devices available | grep -m1 -E "iPhone [0-9]+ \(" | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')
           echo "Simulator $DEV"
           xcrun simctl boot "$DEV"
           xcrun simctl bootstatus "$DEV" -b
