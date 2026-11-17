@@ -4,6 +4,7 @@ import { useStore } from './store.js';
 import { api } from './lib/server.js';
 import { install, installedIds, loadStore, syncStore } from './lib/store-client.js';
 import { Empty, Seg, Sheet } from './ui.jsx';
+import { askNotifications } from './lib/notify.js';
 
 const money = (cur, n) => `${cur === 'GHS' ? 'GH₵' : (cur || '') + ' '}${Number(n).toLocaleString()}`;
 const mb = (n) => (n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB');
@@ -29,7 +30,7 @@ function BuyForm({ item, onSent }) {
   if (!m) return <p className="text-sm text-stone-500 dark:text-stone-400">To buy this, contact {policy?.dealer || 'your dealer'}.</p>;
   const send = async () => {
     setMsg(null); setBusy(true);
-    try { await api('request', { device: deviceCode, itemId: item.id, phone, momoRef: ref, church: church.trim() || undefined }); useStore.getState().setLicState({ storePending: true }); onSent(); }
+    try { await api('request', { device: deviceCode, itemId: item.id, phone, momoRef: ref, church: church.trim() || undefined }); useStore.getState().setLicState({ storePending: true }); askNotifications(); onSent(); }
     catch (e) { setMsg(e.message); } finally { setBusy(false); }
   };
   return (

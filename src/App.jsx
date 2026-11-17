@@ -286,7 +286,7 @@ export default function App() {
   useEffect(() => { setExtraBookNames(bible?.bookNames); }, [bible]);
 
   // Keep every screen in step with the operator.
-  const message = bible ? screenState({ ...state, locked: lockedFeatures(state.licStatus) }, { bible, compare: compareId ? compare : null, songs, media }) : null;
+  const message = bible ? screenState({ ...state, locked: lockedFeatures(state.licStatus), free: state.licStatus?.state === 'free' }, { bible, compare: compareId ? compare : null, songs, media }) : null;
   const json = message ? JSON.stringify(message) : '';
   useEffect(() => { if (json) send(JSON.parse(json)); }, [json]);
 

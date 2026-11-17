@@ -6,6 +6,7 @@ import { getDeviceCode } from './licence.js';
 import { saveImported } from './bible.js';
 import { tx } from './db.js';
 import { IS_NATIVE, Screen } from './output.js';
+import { notify } from './notify.js';
 
 export const installedIds = (st) => new Set([...st.imported.filter((b) => b.store).map((b) => b.store), ...st.media.filter((m) => m.store).map((m) => m.store)]);
 
@@ -57,6 +58,12 @@ export async function install(item) {
 export async function syncStore() {
   const r = await loadStore();
   const have = installedIds(useStore.getState());
-  for (const it of r.items) if (!have.has(it.id) && r.owned.includes(it.id)) await install(it).catch(() => {});
+  for (const it of r.items) {
+    if (have.has(it.id) || !r.owned.includes(it.id)) continue;
+    try {
+      await install(it);
+      if (it.price > 0) notify(`${it.title} is installed`, it.kind === 'bible' ? 'Your payment was confirmed. Choose it in the Bible version list.' : 'Your payment was confirmed. Find it in Media and as a text background.');
+    } catch { /* tried again next time */ }
+  }
   return r;
 }

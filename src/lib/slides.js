@@ -75,6 +75,7 @@ export function screenState(st, { bible, compare, songs, media }) {
   if (locked.has('docs') && st.live?.type === 'pdf') return screenState({ ...st, live: null }, { bible, compare, songs, media });
   // Shared by every message: the camera, the lower-third look and the scrolling ticker.
   const extra = {
+    free: !!st.free, // trial over and no Pro: every screen shows the "Free version" watermark
     // 'phone': the preview takes the app's own camera, the projector opens it directly (no network needed),
     // and Wi-Fi screens receive it over Wi-Fi.
     cam: cam?.on && !locked.has('live') ? { source: cam.source, deviceId: cam.deviceId, facing: cam.facing, mirror: cam.mirror } : null,
@@ -92,7 +93,7 @@ export function screenState(st, { bible, compare, songs, media }) {
     nametag: (() => { const p = !locked.has('live') && nameOn && people.find((x) => x.id === nameOn); return p ? { name: p.name, title: p.title || '', ...(nameTag || {}) } : null; })(),
   };
   const msg = (m) => ({ ...m, ...extra });
-  if (mode === 'black') return { kind: 'black', style: look };
+  if (mode === 'black') return { kind: 'black', style: look, free: extra.free };
   const idle = msg({ kind: 'idle', idle: mediaRef(media.find((m) => m.id === idleId)), style: look });
   if (mode !== 'show' || !live) return idle;
 

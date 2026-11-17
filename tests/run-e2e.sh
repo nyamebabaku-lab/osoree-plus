@@ -14,6 +14,8 @@ mkdir -p tests/out
 LD_LIBRARY_PATH=$HOME/.local/chromium-libs/root/usr/lib/x86_64-linux-gnu node tests/e2e.mjs "$@"
 LD_LIBRARY_PATH=$HOME/.local/chromium-libs/root/usr/lib/x86_64-linux-gnu node tests/licence.mjs
 LD_LIBRARY_PATH=$HOME/.local/chromium-libs/root/usr/lib/x86_64-linux-gnu node tests/licence-server.mjs
+node tests/listen.mjs | tail -1
+LD_LIBRARY_PATH=$HOME/.local/chromium-libs/root/usr/lib/x86_64-linux-gnu node tests/listen-ui.mjs
 node tests/server-licences.mjs | tail -1
 LD_LIBRARY_PATH=$HOME/.local/chromium-libs/root/usr/lib/x86_64-linux-gnu node tests/admin.mjs
 LD_LIBRARY_PATH=$HOME/.local/chromium-libs/root/usr/lib/x86_64-linux-gnu node tests/store.mjs

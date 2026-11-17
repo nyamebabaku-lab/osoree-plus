@@ -16,6 +16,7 @@ export const FEATURES = {
   docs: 'PDF, PowerPoint, Word and Excel',
   watermark: 'Logo watermark',
   backup: 'Backup and restore',
+  listen: 'Scripture listener (hears references from the preacher)',
 };
 export const DEFAULT_POLICY = { trialDays: 30, pro: Object.keys(FEATURES) };
 

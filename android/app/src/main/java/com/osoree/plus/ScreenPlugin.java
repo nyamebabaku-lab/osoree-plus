@@ -57,7 +57,8 @@ import com.osoree.plus.stream.StreamEngine;
  */
 @CapacitorPlugin(name = "Screen", permissions = {
     @Permission(strings = { android.Manifest.permission.CAMERA }, alias = "camera"),
-    @Permission(strings = { android.Manifest.permission.RECORD_AUDIO }, alias = "microphone")
+    @Permission(strings = { android.Manifest.permission.RECORD_AUDIO }, alias = "microphone"),
+    @Permission(strings = { "android.permission.POST_NOTIFICATIONS" }, alias = "notifications")
 })
 public class ScreenPlugin extends Plugin implements DisplayManager.DisplayListener {
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -160,6 +161,146 @@ public class ScreenPlugin extends Plugin implements DisplayManager.DisplayListen
     public void requestMicrophone(PluginCall call) {
         if (getPermissionState("microphone") == PermissionState.GRANTED) { JSObject r = new JSObject(); r.put("granted", true); call.resolve(r); return; }
         requestPermissionForAlias("microphone", call, "microphoneAnswered");
+    }
+
+    // ------------------------------------------------------------------ scripture listener
+    // Continuous speech recognition (offline engine when the phone has one). Each result goes to the app as a
+    // "speech" event; the app spots Bible references and asks the operator before showing anything.
+    private android.speech.SpeechRecognizer recognizer;
+    private boolean listening = false;
+    private String listenLang = "en-US";
+    private int mutedSystem = -1;
+
+    private void quietBeep(boolean quiet) {
+        android.media.AudioManager am = (android.media.AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+        try {
+            if (quiet && mutedSystem < 0) { mutedSystem = am.getStreamVolume(android.media.AudioManager.STREAM_SYSTEM); am.setStreamVolume(android.media.AudioManager.STREAM_SYSTEM, 0, 0); }
+            else if (!quiet && mutedSystem >= 0) { am.setStreamVolume(android.media.AudioManager.STREAM_SYSTEM, mutedSystem, 0); mutedSystem = -1; }
+        } catch (Exception ignored) { /* do-not-disturb rules: leave the volume alone */ }
+    }
+
+    private void listenOnce() {
+        if (!listening) return;
+        if (recognizer == null) {
+            Context ctx = getContext();
+            if (android.os.Build.VERSION.SDK_INT >= 31 && android.speech.SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)) recognizer = android.speech.SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx);
+            else recognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(ctx);
+            recognizer.setRecognitionListener(new android.speech.RecognitionListener() {
+                public void onReadyForSpeech(android.os.Bundle b) { emitListen("listening", null); }
+                public void onBeginningOfSpeech() {}
+                public void onRmsChanged(float v) {}
+                public void onBufferReceived(byte[] b) {}
+                public void onEndOfSpeech() {}
+                public void onError(int error) {
+                    if (!listening) return;
+                    if (error == android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) { emitListen("error", "Allow the microphone to listen for scriptures."); stopAll(); return; }
+                    if (error == 13 /* LANGUAGE_NOT_SUPPORTED */ || error == 12 /* LANGUAGE_UNAVAILABLE */) { emitListen("error", "This phone has no offline English speech pack. Connect to the internet, or add English in Settings → Google → Speech."); }
+                    main.postDelayed(ScreenPlugin.this::listenOnce, error == android.speech.SpeechRecognizer.ERROR_RECOGNIZER_BUSY ? 800 : 250);
+                }
+                public void onResults(android.os.Bundle b) { emitText(b, true); main.postDelayed(ScreenPlugin.this::listenOnce, 100); }
+                public void onPartialResults(android.os.Bundle b) { emitText(b, false); }
+                public void onEvent(int t, android.os.Bundle b) {}
+            });
+        }
+        Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, listenLang);
+        i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+        i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
+        i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500);
+        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000);
+        try { recognizer.startListening(i); } catch (Exception e) { main.postDelayed(this::listenOnce, 1000); }
+    }
+
+    private void emitText(android.os.Bundle b, boolean fin) {
+        java.util.ArrayList<String> list = b.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION);
+        if (list == null || list.isEmpty()) return;
+        JSObject r = new JSObject();
+        r.put("text", list.get(0));
+        r.put("alternatives", new JSArray(list));
+        r.put("final", fin);
+        notifyListeners("speech", r);
+    }
+
+    private void emitListen(String state, String message) {
+        JSObject r = new JSObject();
+        r.put("state", state);
+        if (message != null) r.put("message", message);
+        notifyListeners("listen", r);
+    }
+
+    private void stopAll() {
+        listening = false;
+        if (recognizer != null) { try { recognizer.cancel(); recognizer.destroy(); } catch (Exception ignored) { } recognizer = null; }
+        quietBeep(false);
+        emitListen("off", null);
+    }
+
+    @PluginMethod
+    public void startListening(PluginCall call) {
+        if (getPermissionState("microphone") != PermissionState.GRANTED) { call.reject("Allow the microphone first."); return; }
+        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(getContext())) { call.reject("This phone has no speech recognition. Install or update the Google app."); return; }
+        listenLang = call.getString("lang", "en-US");
+        main.post(() -> { listening = true; quietBeep(true); listenOnce(); call.resolve(); });
+    }
+
+    @PluginMethod
+    public void stopListening(PluginCall call) { main.post(() -> { stopAll(); call.resolve(); }); }
+
+    /** A soft nudge for the operator: a short vibration and, if wanted, a quiet tone. */
+    @PluginMethod
+    public void buzz(PluginCall call) {
+        try {
+            android.os.Vibrator v = (android.os.Vibrator) getContext().getSystemService(Context.VIBRATOR_SERVICE);
+            if (v != null && v.hasVibrator()) {
+                if (android.os.Build.VERSION.SDK_INT >= 26) v.vibrate(android.os.VibrationEffect.createWaveform(new long[] { 0, 60, 90, 60 }, -1)); else v.vibrate(120);
+            }
+            if (call.getBoolean("sound", false)) {
+                android.media.ToneGenerator tg = new android.media.ToneGenerator(android.media.AudioManager.STREAM_NOTIFICATION, 35);
+                tg.startTone(android.media.ToneGenerator.TONE_PROP_BEEP2, 160);
+                main.postDelayed(tg::release, 400);
+            }
+        } catch (Exception ignored) { }
+        call.resolve();
+    }
+
+    // ------------------------------------------------------------------ notifications
+    @PluginMethod
+    public void requestNotifications(PluginCall call) {
+        if (android.os.Build.VERSION.SDK_INT < 33 || getPermissionState("notifications") == PermissionState.GRANTED) { JSObject r = new JSObject(); r.put("granted", true); call.resolve(r); return; }
+        requestPermissionForAlias("notifications", call, "notificationsAnswered");
+    }
+
+    @PermissionCallback
+    private void notificationsAnswered(PluginCall call) {
+        JSObject r = new JSObject();
+        r.put("granted", getPermissionState("notifications") == PermissionState.GRANTED);
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void notify(PluginCall call) {
+        Context ctx = getContext();
+        android.app.NotificationManager nm = (android.app.NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+        String channel = call.getString("channel", "updates");
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            boolean urgent = "scripture".equals(channel);
+            android.app.NotificationChannel ch = new android.app.NotificationChannel(channel, urgent ? "Scriptures heard" : "Pro and store updates",
+                urgent ? android.app.NotificationManager.IMPORTANCE_HIGH : android.app.NotificationManager.IMPORTANCE_DEFAULT);
+            nm.createNotificationChannel(ch);
+        }
+        Intent open = new Intent(ctx, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        android.app.PendingIntent pi = android.app.PendingIntent.getActivity(ctx, 0, open, android.app.PendingIntent.FLAG_IMMUTABLE | android.app.PendingIntent.FLAG_UPDATE_CURRENT);
+        androidx.core.app.NotificationCompat.Builder b = new androidx.core.app.NotificationCompat.Builder(ctx, channel)
+            .setSmallIcon(ctx.getApplicationInfo().icon)
+            .setContentTitle(call.getString("title", "Ɔsɔreɛ Plus"))
+            .setContentText(call.getString("body", ""))
+            .setStyle(new androidx.core.app.NotificationCompat.BigTextStyle().bigText(call.getString("body", "")))
+            .setAutoCancel(true)
+            .setContentIntent(pi);
+        try { nm.notify(call.getInt("id", 1), b.build()); } catch (SecurityException e) { /* notifications not allowed */ }
+        call.resolve();
     }
 
     @PermissionCallback
@@ -590,6 +731,7 @@ public class ScreenPlugin extends Plugin implements DisplayManager.DisplayListen
 
     @Override
     protected void handleOnDestroy() {
+        stopAll();
         stream.stop();
         displays.unregisterDisplayListener(this);
         if (presentation != null) { try { presentation.dismiss(); } catch (Exception e) { /* already gone */ } presentation = null; }

@@ -25,11 +25,21 @@ await tab('Screen'); const code = await page.locator('code', { hasText: /^OSR-/ 
 ok('device code shown', /^OSR(-[2-9A-HJ-NP-Z]{4}){3}$/.test(code), code);
 await tab('Live'); await page.getByRole('button', { name: /Turn on live video/ }).click(); await page.waitForTimeout(300);
 ok('Pro features work during the trial', !!(await live()).cam);
+const proj = await page.context().newPage(); await proj.setViewportSize({ width: 1280, height: 720 }); await proj.goto(base + 'display.html'); await proj.waitForTimeout(500);
+const brandOn = (p) => p.evaluate(() => { const b = document.getElementById('brand'); return getComputedStyle(b).display !== 'none' && b.textContent.includes('Free version'); });
+ok('no watermark during the trial', !(await brandOn(proj)) && !(await live()).free);
 await page.getByRole('button', { name: /Turn off live video/ }).click();
 
 // the trial runs out
 await setState({ trialStart: now() - 31 * 86400 }); await page.reload(); await page.waitForSelector('nav');
 await page.waitForSelector('text=FREE · GET PRO'); ok('after 30 days: Free', true);
+await page.waitForTimeout(400);
+ok('trial over: "Free version" watermark on the projector', (await live()).free === true && await brandOn(proj));
+ok('…and in the phone preview', await page.frameLocator('iframe').first().locator('#brand').evaluate((b) => getComputedStyle(b).display !== 'none').catch(() => false));
+await page.getByRole('button', { name: 'Black' }).click(); await page.waitForTimeout(300);
+ok('…even on a black screen', (await live()).kind === 'black' && await brandOn(proj));
+await proj.screenshot({ path: 'tests/out/free-watermark.png' });
+await page.getByRole('button', { name: 'Black' }).click();
 await tab('Live'); ok('locked features are marked PRO', await page.getByText('PRO', { exact: true }).first().isVisible());
 await page.getByRole('button', { name: /Turn on live video/ }).click();
 await page.waitForSelector('role=dialog[name="Ɔsɔreɛ Plus Pro"]'); ok('tapping a Pro feature opens the Pro sheet', await page.getByText(/needs Pro: the 30-day trial has ended/).isVisible());
@@ -60,6 +70,8 @@ ok('expired licence refused', /ended on/.test(await tryLicence(issue(code, '--un
 ok('rubbish refused', /not an Ɔsɔreɛ Plus licence/.test(await tryLicence('hello')));
 ok('valid licence accepted', (await tryLicence(good)) === '');
 await page.waitForSelector('h1 >> text=Pro');
+await page.waitForTimeout(400);
+ok('Pro activated: watermark gone everywhere', !(await live()).free && !(await brandOn(proj)));
 const badge = await page.locator('h1 [aria-label="Pro"]').evaluate((e) => ({ w: getComputedStyle(e).fontWeight, c: getComputedStyle(e).color }));
 const [r, g, bl] = badge.c.match(/\d+/g).map(Number);
 ok('“Pro” in bold green', +badge.w >= 700 && g > 120 && g > r * 2 && g > bl * 1.4, JSON.stringify(badge));

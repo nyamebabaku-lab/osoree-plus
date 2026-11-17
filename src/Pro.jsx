@@ -6,6 +6,7 @@ import { api, openCheckout } from './lib/server.js';
 import { IS_NATIVE } from './lib/output.js';
 import { Sheet } from './ui.jsx';
 import { syncStore } from './lib/store-client.js';
+import { askNotifications, notify } from './lib/notify.js';
 
 const policyOf = (st) => ({ ...DEFAULT_POLICY, ...(st.policy ? { trialDays: st.policy.trialDays ?? DEFAULT_POLICY.trialDays, pro: st.policy.pro || DEFAULT_POLICY.pro } : {}) });
 
@@ -30,8 +31,8 @@ export async function checkPayment(ref) {
 export async function checkRequest() {
   const { deviceCode, setLicence, setLicState } = useStore.getState();
   const r = await api('request-status', { device: deviceCode || await getDeviceCode() });
-  if (r.status === 'approved' && r.licence) { setLicence(r.licence); setLicState({ pendingReq: '' }); }
-  else if (r.status !== 'pending') setLicState({ pendingReq: '' });
+  if (r.status === 'approved' && r.licence) { setLicence(r.licence); setLicState({ pendingReq: '' }); notify('Ɔsɔreɛ Plus Pro is active', 'Your payment was confirmed. Thank you! Every Pro feature is now on.'); }
+  else if (r.status !== 'pending') { setLicState({ pendingReq: '' }); if (r.status === 'declined') notify('Pro request not approved', r.reason ? `Reason: ${r.reason}` : 'Open Ɔsɔreɛ Plus for details.'); }
   return r;
 }
 
@@ -223,7 +224,7 @@ function MomoRequest({ product }) {
     setMsg(null); setBusy(true);
     try {
       const r = await api('request', { device: deviceCode, product, phone, momoRef: ref, church: church.trim() || undefined });
-      setLicState({ pendingReq: r.id }); setReq({ status: 'pending' });
+      setLicState({ pendingReq: r.id }); setReq({ status: 'pending' }); askNotifications();
       setMsg({ text: 'Request sent. Pro switches on by itself as soon as your payment is confirmed (keep the internet on).' });
     } catch (e) { setMsg({ text: e.message, bad: true }); } finally { setBusy(false); }
   };

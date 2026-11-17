@@ -6,6 +6,7 @@ import { search } from '../lib/bible.js';
 import { MAX_REFS } from '../lib/slides.js';
 import { tokens } from '../lib/strongs.js';
 import { VerseRow, MicButton, Empty } from '../ui.jsx';
+import ListenPanel from '../ListenPanel.jsx';
 import StrongsSheet from './StrongsSheet.jsx';
 
 // Checks typed references against this Bible. Returns { refs } or { error }, or null for "not a reference".
@@ -73,6 +74,7 @@ export default function BibleTab({ bible }) {
         }} />
       </form>
 
+      <ListenPanel bible={bible} />
       {target?.error && <p className="px-1 text-sm text-red-600 dark:text-red-400">{target.error}</p>}
       {target?.refs && (target.refs[0].c != null || target.refs.length === 1) && (
         <button onClick={() => (target.refs[0].c == null ? (setView({ b: target.refs[0].b, c: bible.books[target.refs[0].b].length === 1 ? 0 : null }), setQ('')) : go(target))} className="flex w-full items-center gap-2 rounded-xl bg-gold-400/20 px-3 py-2.5 text-left text-sm ring-1 ring-gold-500">

@@ -51,6 +51,14 @@
   #pip { position: fixed; z-index: 3; box-sizing: border-box; opacity: 0; transition: opacity .3s; pointer-events: none; overflow: hidden; background: #000; }
   #pip img, #pip video { display: block; width: 100%; height: auto; }
   /* church logo watermark */
+  /* Trial over, no Pro: the free-version watermark on every screen (above everything, cannot be hidden from the app). */
+  #brand { position: fixed; inset: 0; z-index: 50; pointer-events: none; display: none; overflow: hidden; }
+  #brand.on { display: block; }
+  #brand .diag { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(-24deg); white-space: nowrap; font: 800 11vh/1 system-ui, 'Noto Sans', sans-serif; color: rgba(255,255,255,.13); text-shadow: 0 0 1px rgba(0,0,0,.25); letter-spacing: .02em; }
+  #brand .badge { position: absolute; right: 2.2vw; bottom: 2.6vh; display: flex; align-items: center; gap: 1vh; padding: 1vh 1.8vh; border-radius: 1.2vh; background: rgba(0,0,0,.62); color: #fff; font: 700 2.6vh/1.1 system-ui, 'Noto Sans', sans-serif; }
+  #brand .badge b { color: #e2b232; }
+  #brand .badge small { display: block; font-weight: 600; font-size: 1.8vh; color: rgba(255,255,255,.75); }
+  #brand.ticker .badge { bottom: calc(6.2vh + 2.6vh); }
   #wm { position: fixed; z-index: 5; opacity: 0; transition: opacity .3s; pointer-events: none; }
   #wm img { display: block; width: 100%; height: auto; }
   #ltbox { position: relative; padding: .55em .9em .6em; border-radius: .35em; overflow: hidden; }
@@ -79,6 +87,7 @@
 <div id="lt"><div id="ltbox"><div id="ltbg"></div><div id="ltbar"></div><div id="lttext"></div></div></div>
 <div id="ticker"><div id="tickerbg"></div><div id="tickertext"></div></div>
 <div id="wm"><img alt=""></div>
+<div id="brand"><div class="diag">Ɔsɔreɛ Plus · Free version</div><div class="badge"><div>Ɔsɔreɛ <b>Plus</b> · Free version<small>Get Pro to remove this</small></div></div></div>
 <div id="nt"><div id="ntbox"><div id="ntbg"></div><div id="ntbar"></div><div id="nttext"><p id="ntname"></p><p id="nttitle"></p></div></div></div>
 <div id="hint" class="note" hidden>Click for full screen</div>
 <div id="sound" class="note" hidden>Click to turn on the sound</div>
@@ -511,8 +520,10 @@
     }
   }
 
+  var brand = $('brand');
   function render(s) {
     if (!s) return;
+    brand.className = s.free ? 'on' + (s.ticker ? ' ticker' : '') : '';
     var key = s.kind + '|' + JSON.stringify(s.groups || s.lines || (s.entry && s.entry.num + s.ref) || '') + '|' + !!(s.cam || OVERLAY);
     var changed = key !== textKey;
     current = s; textKey = key;
