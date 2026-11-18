@@ -30,14 +30,14 @@ let deviceInfoCache = null;
 /** What this device is (for the Super Admin's device list): model, system, country, time zone. */
 export async function getDeviceInfo() {
   if (deviceInfoCache) return deviceInfoCache;
-  let model = '', os = '';
-  if (IS_NATIVE) { const r = await Screen.getDeviceId().catch(() => ({})); model = r.model || ''; os = r.os || ''; }
+  let model = '', os = '', sim = '';
+  if (IS_NATIVE) { const r = await Screen.getDeviceId().catch(() => ({})); model = r.model || ''; os = r.os || ''; sim = r.sim || ''; }
   else if (window.osoreeDesktop?.info) ({ model, os } = window.osoreeDesktop.info);
   else { const ua = navigator.userAgent; os = (ua.match(/(Windows NT [\d.]+|Android [\d.]+|iPhone OS [\d_]+|Mac OS X [\d_]+|Linux)/) || [''])[0].replace(/_/g, '.'); model = (ua.match(/(Edg|Chrome|Firefox|Safari)\/[\d]+/) || ['Browser'])[0]; }
   const lang = navigator.language || '';
   let timezone = '';
   try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { /* old browser */ }
-  deviceInfoCache = { model, os, country: (lang.split('-')[1] || '').toUpperCase(), timezone };
+  deviceInfoCache = { model, os, sim, country: (lang.split('-')[1] || '').toUpperCase(), timezone };
   return deviceInfoCache;
 }
 export async function getDeviceCode() {

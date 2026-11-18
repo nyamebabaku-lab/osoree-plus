@@ -154,6 +154,10 @@ public class ScreenPlugin extends Plugin implements DisplayManager.DisplayListen
         String model = android.os.Build.MODEL == null ? "" : android.os.Build.MODEL;
         r.put("model", model.toLowerCase().startsWith(maker.toLowerCase()) ? model : (maker.isEmpty() ? model : Character.toUpperCase(maker.charAt(0)) + maker.substring(1) + " " + model));
         r.put("os", "Android " + android.os.Build.VERSION.RELEASE);
+        try { // the SIM card's country (no permission needed): one of the checks for Ghana prices
+            android.telephony.TelephonyManager tm = (android.telephony.TelephonyManager) getContext().getSystemService(Context.TELEPHONY_SERVICE);
+            r.put("sim", tm != null && tm.getSimCountryIso() != null ? tm.getSimCountryIso().toUpperCase() : "");
+        } catch (Exception e) { r.put("sim", ""); }
         call.resolve(r);
     }
 

@@ -6,7 +6,7 @@ import { admin, sb } from './api.js';
 import { FEATURES } from '../lib/licence.js';
 import { Empty, Seg } from '../ui.jsx';
 
-const money = (n, cur = 'GHS') => `${cur === 'GHS' ? 'GH₵' : cur + ' '}${Number(n || 0).toLocaleString()}`;
+const money = (n, cur = 'GHS') => `${cur === 'GHS' ? 'GH₵' : cur === 'USD' ? 'US$' : cur + ' '}${Number(n || 0).toLocaleString()}`;
 const when = (t) => (t ? new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '');
 const day = (t) => (t ? new Date(t).toLocaleDateString([], { dateStyle: 'medium' }) : 'no end');
 const PRODUCT = { pro: 'Pro (no end)', year: 'Pro, 1 year' };
@@ -95,7 +95,7 @@ function HomeTab({ go, onCount }) {
       )}
       {x?.pending_requests > 0 && <button onClick={() => go('requests')} className="w-full rounded-xl bg-green-600 p-3 text-left text-sm font-bold text-white">{x.pending_requests} Pro {x.pending_requests === 1 ? 'request is' : 'requests are'} waiting for you. Tap to check the MoMo payment and approve.</button>}
       <div className="grid grid-cols-2 gap-2">
-        {[['Revenue', x && money(x.revenue + (x.momo_revenue || 0))], ['This month', x && money(x.revenue_month + (x.momo_revenue_month || 0))], ['Active Pro', x?.licences], ['Devices', x?.devices], ['Used in 30 days', x?.active30], ['Test sales', x?.test_sales]].map(([k, v]) => (
+        {[['Revenue (Ghana)', x && money(x.revenue + (x.momo_revenue || 0))], ['Revenue (abroad)', x && money(x.revenue_usd || 0, 'USD')], ['This month (Ghana)', x && money(x.revenue_month + (x.momo_revenue_month || 0))], ['Active Pro', x?.licences], ['Devices', x?.devices], ['Used in 30 days', x?.active30], ['Test sales', x?.test_sales]].map(([k, v]) => (
           <div key={k} className="card p-3"><div className="label">{k}</div><div className="mt-1 text-xl font-extrabold">{v ?? '…'}</div></div>
         ))}
       </div>
@@ -104,7 +104,7 @@ function HomeTab({ go, onCount }) {
         {!r.data?.payments?.length ? <Empty>No payments yet.</Empty> : r.data.payments.map((p) => (
           <div key={p.id} className="flex items-center gap-2 border-b border-paper-200 py-2 text-sm last:border-0 dark:border-night-700">
             <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold text-white ${p.status === 'paid' ? 'bg-green-600' : p.status === 'failed' ? 'bg-red-600' : 'bg-amber-500'}`}>{p.status.toUpperCase()}</span>
-            <span className="min-w-0 flex-1 truncate"><b>{money(p.amount, p.currency)}</b> · {PRODUCT[p.product]} · {p.church || p.phone}{p.provider === 'test' ? ' · test' : ''}</span>
+            <span className="min-w-0 flex-1 truncate"><b>{p.list_currency && p.list_currency !== p.currency ? money(p.list_amount, p.list_currency) : money(p.amount, p.currency)}</b> · {PRODUCT[p.product]} · {p.church || p.phone}{p.provider === 'test' ? ' · test' : ''}</span>
             <span className="shrink-0 text-xs text-stone-500">{when(p.created_at)}</span>
           </div>
         ))}
@@ -257,7 +257,7 @@ function thumbOf(file) {
     else { const i = new window.Image(); i.onload = () => draw(i, i.naturalWidth, i.naturalHeight); i.onerror = () => resolve(null); i.src = url; }
   });
 }
-const BLANK = { kind: 'bible', title: '', abbr: '', lang: '', description: '', copyright: '', price: 0, active: true, apple_product: '', google_product: '' };
+const BLANK = { kind: 'bible', title: '', abbr: '', lang: '', description: '', copyright: '', price: 0, price_usd: 0, active: true, apple_product: '', google_product: '' };
 function StoreTab() {
   const list = useLoad(() => admin('storeItems'), []);
   const [f, setF] = useState(BLANK);
@@ -279,7 +279,7 @@ function StoreTab() {
         }
       }
       setBusy('Saving…');
-      const meta = { ...f, title: f.title || up?.title || '', abbr: f.abbr || up?.abbr || '', price: Number(f.price) || 0, thumb };
+      const meta = { ...f, title: f.title || up?.title || '', abbr: f.abbr || up?.abbr || '', price: Number(f.price) || 0, price_usd: Number(f.price_usd) || 0, thumb };
       const { id } = await admin('storeSave', meta);
       if (up) {
         setBusy('Uploading…');
@@ -311,7 +311,10 @@ function StoreTab() {
           <input className="field mt-1" value={f.apple_product || ''} onChange={(e) => setF({ ...f, apple_product: e.target.value })} placeholder="App Store product ID, e.g. com.osoree.plus.bible.twi" aria-label="App Store product ID" />
           <input className="field mt-1" value={f.google_product || ''} onChange={(e) => setF({ ...f, google_product: e.target.value })} placeholder="Google Play product ID, e.g. bible_twi" aria-label="Google Play product ID" />
         </details>}
-        <label className="block text-xs font-semibold">Price in GH₵ (0 = free, per church)<input className="field mt-1" type="number" min="0" value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} aria-label="Item price" /></label>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block text-xs font-semibold">Price in Ghana, GH₵ (0 = free)<input className="field mt-1" type="number" min="0" value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} aria-label="Item price" /></label>
+          <label className="block text-xs font-semibold">Price abroad, US$ (0 = not sold abroad)<input className="field mt-1" type="number" min="0" step="0.01" value={f.price_usd} onChange={(e) => setF({ ...f, price_usd: e.target.value })} aria-label="Item price US$" /></label>
+        </div>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} className="h-4 w-4 accent-green-600" aria-label="Show in the store" />Show in the store</label>
         {f.kind === 'bible' && <p className="text-xs text-amber-700 dark:text-amber-400">Only upload Bibles you are allowed to share or sell (public domain, or with the publisher’s written permission).</p>}
         <div className="flex gap-2">
@@ -328,7 +331,7 @@ function StoreTab() {
             {it.thumb ? <img src={it.thumb} alt="" className="h-10 w-16 rounded object-cover" /> : <span className="grid h-10 w-16 place-items-center rounded bg-gold-500/15 text-xs font-bold">{it.abbr || 'BIBLE'}</span>}
             <div className="min-w-0 flex-1">
               <div className="truncate font-bold">{it.title}</div>
-              <div className="text-xs text-stone-500">{it.price ? money(it.price, it.currency) : 'Free'} · {it.active ? 'showing' : 'hidden'}{it.file_path ? '' : ' · no file yet!'}</div>
+              <div className="text-xs text-stone-500">{it.price ? money(it.price, it.currency) : 'Free'}{Number(it.price_usd) > 0 ? ` · ${money(it.price_usd, 'USD')} abroad` : ''} · {it.active ? 'showing' : 'hidden'}{it.file_path ? '' : ' · no file yet!'}</div>
             </div>
             <button onClick={() => { setF({ ...BLANK, ...it, abbr: it.abbr || '', lang: it.lang || '', description: it.description || '', copyright: it.copyright || '', apple_product: it.apple_product || '', google_product: it.google_product || '' }); setFile(null); window.scrollTo(0, 0); }} className="btn-soft min-h-9 px-3 text-sm">Edit</button>
           </div>
@@ -378,7 +381,7 @@ function DevicesList() {
               <b className="min-w-0 flex-1 truncate">{x.church || x.model || 'Unknown device'}</b>
               <span className={`text-xs font-semibold ${behind ? 'text-amber-600' : 'text-stone-500'}`}>v{x.version || '?'}{behind ? ' (old)' : ''}</span>
             </div>
-            <div className="text-xs text-stone-500">{[x.model, x.os, x.country, x.timezone].filter(Boolean).join(' · ')}</div>
+            <div className="text-xs text-stone-500">{[x.model, x.os, x.ip_country && `internet: ${x.ip_country}`, x.sim_country && `SIM: ${x.sim_country}`, x.country, x.timezone].filter(Boolean).join(' · ')}</div>
             <div className="text-xs text-stone-500"><span className="font-mono">{x.code}</span> · first {day(x.first_seen)} · last seen {ago(x.last_seen)}</div>
             {(x.phone || x.linked_phones || x.licence_product) && <div className="text-xs">{x.licence_product ? `${PRODUCT[x.licence_product]}${x.licence_expires ? ` until ${day(x.licence_expires)}` : ''}` : 'No Pro'}{x.phone ? ` · ${x.phone}` : ''}{x.linked_phones && x.linked_phones !== x.phone ? ` · church no. ${x.linked_phones}` : ''}</div>}
             {feats.length > 0 && <div className="flex flex-wrap gap-1">{feats.map(([k, n]) => <span key={k} className="rounded-full bg-paper-200 px-2 py-0.5 text-[10px] font-semibold dark:bg-night-700">{k} {n}</span>)}</div>}
@@ -504,13 +507,13 @@ function SettingsTab() {
   const s = useLoad(() => admin('settings'), []);
   const [f, setF] = useState(null);
   const [msg, setMsg] = useState(null);
-  const withDefaults = (d) => ({ trialDays: 30, pro: [], prices: { pro: 0, year: 0 }, provider: 'paystack', testMode: true, movesPerYear: 2, smsSender: '', dealer: '', momoNumber: '', momoName: '', momoNetwork: '', onlinePay: true, supportEmail: '', supportWhatsapp: '', ...d, prices: { pro: 0, year: 0, ...(d?.prices || {}) }, pro: Array.isArray(d?.pro) ? d.pro : [] });
+  const withDefaults = (d) => ({ trialDays: 30, pro: [], prices: { pro: 0, year: 0 }, provider: 'paystack', testMode: true, movesPerYear: 2, smsSender: '', dealer: '', momoNumber: '', momoName: '', momoNetwork: '', onlinePay: true, supportEmail: '', supportWhatsapp: '', paystackUSD: false, usdRate: 0, ...d, pricesUSD: { pro: 0, year: 0, ...(d?.pricesUSD || {}) }, prices: { pro: 0, year: 0, ...(d?.prices || {}) }, pro: Array.isArray(d?.pro) ? d.pro : [] });
   useEffect(() => { if (s.data) setF(withDefaults(s.data)); }, [s.data]);
   if (!f) return s.error ? <p className="text-sm text-red-600">{s.error}</p> : <Empty>Loading…</Empty>;
   const save = async () => {
     setMsg(null);
     try {
-      const next = await admin('saveSettings', { trialDays: Number(f.trialDays), pro: f.pro, prices: { pro: Number(f.prices.pro), year: Number(f.prices.year) }, provider: f.provider, testMode: f.testMode, movesPerYear: Number(f.movesPerYear), smsSender: f.smsSender, dealer: f.dealer, momoNumber: f.momoNumber, momoName: f.momoName, momoNetwork: f.momoNetwork, onlinePay: f.onlinePay, supportEmail: f.supportEmail, supportWhatsapp: f.supportWhatsapp });
+      const next = await admin('saveSettings', { trialDays: Number(f.trialDays), pro: f.pro, prices: { pro: Number(f.prices.pro), year: Number(f.prices.year) }, provider: f.provider, testMode: f.testMode, movesPerYear: Number(f.movesPerYear), smsSender: f.smsSender, dealer: f.dealer, momoNumber: f.momoNumber, momoName: f.momoName, momoNetwork: f.momoNetwork, onlinePay: f.onlinePay, supportEmail: f.supportEmail, supportWhatsapp: f.supportWhatsapp, pricesUSD: { pro: Number(f.pricesUSD.pro), year: Number(f.pricesUSD.year) }, paystackUSD: !!f.paystackUSD, usdRate: Number(f.usdRate) || 0 });
       setF(withDefaults(next)); setMsg({ text: 'Saved. Phones pick up the changes the next time they go online.' });
     } catch (e) { setMsg({ text: e.message, bad: true }); }
   };
@@ -524,6 +527,16 @@ function SettingsTab() {
           <label className="text-xs font-semibold">Pro, one year<input className="field mt-1" type="number" min="0" value={f.prices.year} onChange={(e) => setF({ ...f, prices: { ...f.prices, year: e.target.value } })} aria-label="Price one year" /></label>
         </div>
         <p className="text-xs text-stone-500 dark:text-stone-400">Set a price to 0 to stop selling that option.</p>
+      </section>
+      <section className="card space-y-3 p-4">
+        <div className="label">Prices outside Ghana (US$, card only)</div>
+        <p className="text-xs text-stone-500 dark:text-stone-400">Churches abroad never see Ghana prices or MoMo. Where a church is comes from its internet connection (and the SIM card on Android).</p>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-xs font-semibold">Pro, no end date (US$)<input className="field mt-1" type="number" min="0" step="0.01" value={f.pricesUSD.pro} onChange={(e) => setF({ ...f, pricesUSD: { ...f.pricesUSD, pro: e.target.value } })} aria-label="US$ price Pro" /></label>
+          <label className="text-xs font-semibold">Pro, one year (US$)<input className="field mt-1" type="number" min="0" step="0.01" value={f.pricesUSD.year} onChange={(e) => setF({ ...f, pricesUSD: { ...f.pricesUSD, year: e.target.value } })} aria-label="US$ price one year" /></label>
+        </div>
+        <label className="flex items-center justify-between gap-3 text-sm"><span><b>Paystack takes US$ on my account</b><span className="block text-xs text-stone-500 dark:text-stone-400">Ask Paystack to switch on US$ payments first.</span></span><input type="checkbox" checked={!!f.paystackUSD} onChange={(e) => setF({ ...f, paystackUSD: e.target.checked })} className="h-5 w-5 accent-green-600" aria-label="Paystack takes US$" /></label>
+        {!f.paystackUSD && <label className="block text-xs font-semibold">Until then: GH₵ per US$ (the card is charged the US$ price in GH₵)<input className="field mt-1" type="number" min="0" step="0.01" value={f.usdRate} onChange={(e) => setF({ ...f, usdRate: e.target.value })} placeholder="e.g. 15.50" aria-label="Exchange rate" /></label>}
       </section>
       <section className="card space-y-3 p-4">
         <div className="label">Free trial and Pro</div>

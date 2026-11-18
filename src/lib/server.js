@@ -4,7 +4,14 @@ import { IS_NATIVE, Screen } from './output.js';
 
 export const SERVER = import.meta.env.VITE_LICENCE_SERVER || 'https://inoxsalemgwgrzftamxs.supabase.co/functions/v1/osoree';
 
+// Where the device is (SIM, region, time zone): the server also checks the internet address, then picks GH₵ or US$ prices.
+const REGIONAL = new Set(['config', 'buy', 'request', 'store']);
 export async function api(route, body = {}) {
+  if (REGIONAL.has(route)) {
+    const { getDeviceInfo } = await import('./licence.js');
+    const { sim, country, timezone } = await getDeviceInfo().catch(() => ({}));
+    body = { sim, country, timezone, ...body };
+  }
   let r;
   try {
     r = await fetch(`${SERVER}/${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

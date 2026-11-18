@@ -34,8 +34,8 @@ const admin = (route, body) => handle(d, `admin/${route}`, body, { user: boss })
 let pass = 0, fail = 0; const ok = (n, c, x = '') => { c ? pass++ : fail++; console.log(c ? 'PASS' : 'FAIL', n, x); };
 const b = await chromium.launch({ executablePath: process.env.HOME + '/.cache/ms-playwright/chromium-1148/chrome-linux/chrome' });
 const errs = [];
-async function phone() {
-  const ctx = await b.newContext({ viewport: { width: 400, height: 860 }, serviceWorkers: 'block' });
+async function phone(timezoneId = 'Africa/Accra') {
+  const ctx = await b.newContext({ viewport: { width: 400, height: 860 }, serviceWorkers: 'block', timezoneId });
   await ctx.route(`${SERVER}/**`, async (route) => {
     const r = new URL(route.request().url()).pathname.replace(/^.*\/osoree\//, '');
     try { await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(await handle(d, r, route.request().postDataJSON() || {})) }); }
@@ -138,6 +138,18 @@ await p6.page.getByRole('button', { name: 'Send Pro request' }).click(); await p
 await admin('declineRequest', { id: (await d.query('select id from licence_requests where device_code = $1', [p6.code]))[0].id, reason: 'Payment not found' });
 await p6.page.getByRole('button', { name: 'Check now' }).click();
 await p6.page.waitForSelector('text=/not approved: Payment not found/', { timeout: 5000 }).then(() => ok('declined request explained', true), () => ok('declined request explained', false));
+
+// 9. a church abroad: US$ prices, card only, never the Ghana prices or MoMo
+await admin('saveSettings', { pricesUSD: { pro: 49, year: 29 }, onlinePay: false, usdRate: 15.5 });
+const pUK = await phone('Europe/London'); await openPro(pUK.page);
+await pUK.page.waitForSelector('text=US$49');
+const sheet = await pUK.page.locator('[role=dialog], .fixed').last().innerText();
+ok('abroad: US$ prices shown', sheet.includes('US$49') && sheet.includes('US$29'));
+ok('abroad: no Ghana prices, no MoMo', !/GH₵/.test(sheet) && !/Mobile Money/.test(sheet));
+ok('abroad: card payment with receipt e-mail and the terms', await pUK.page.getByRole('button', { name: /Pay US\$49 by card/ }).isVisible() && await pUK.page.getByLabel('E-mail for receipt').isVisible() && /no refunds once activated/.test(sheet));
+const pGH = await phone('Africa/Accra'); await openPro(pGH.page);
+await pGH.page.waitForSelector('text=Pay by Mobile Money');
+ok('Ghana: GH₵ prices with MoMo', (await pGH.page.getByRole('radio', { name: /Pro for this device/ }).innerText()).includes('GH₵'));
 
 ok('no page errors', errs.length === 0, errs.join(' | '));
 console.log(pass, 'passed', fail, 'failed'); await b.close();

@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BookOpen, Check, Clock, Download, Image as ImageIcon, ShoppingBag, Smartphone } from 'lucide-react';
 import { useStore } from './store.js';
-import { api } from './lib/server.js';
+import { api, openCheckout } from './lib/server.js';
+import { Agree } from './Pro.jsx';
 import { install, installedIds, loadStore, syncStore } from './lib/store-client.js';
 import { Empty, Seg, Sheet } from './ui.jsx';
 import { askNotifications } from './lib/notify.js';
 import { IS_IOS, Screen } from './lib/output.js';
 
-const money = (cur, n) => `${cur === 'GHS' ? 'GH₵' : (cur || '') + ' '}${Number(n).toLocaleString()}`;
+const money = (cur, n) => `${cur === 'GHS' ? 'GH₵' : cur === 'USD' ? 'US$' : (cur || '') + ' '}${Number(n).toLocaleString()}`;
 const mb = (n) => (n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB');
 
 export function StoreButton({ className = 'btn-soft w-full' }) {
@@ -42,6 +43,39 @@ function BuyForm({ item, onSent }) {
       <input className="field" value={church} onChange={(e) => setChurch(e.target.value)} placeholder="Church name (optional)" aria-label={`Church for ${item.title}`} />
       <button onClick={send} disabled={busy || !phone.trim() || ref.trim().length < 4} className="btn w-full bg-green-600 text-white">{busy ? 'Sending…' : 'Send request'}</button>
       {msg && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{msg}</p>}
+    </div>
+  );
+}
+
+// Abroad (or without a MoMo number): pay by card; the item installs by itself once the payment goes through.
+function CardBuy({ item, onPaid }) {
+  const { deviceCode, policy } = useStore();
+  const abroad = policy?.region === 'INTL';
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const pay = async () => {
+    setMsg(null); setBusy(true);
+    try {
+      const r = await api('buy', { device: deviceCode, itemId: item.id, phone, email: email.trim() || undefined });
+      await openCheckout(r.url);
+      setMsg({ text: 'Finish paying in the browser, then come back. It installs by itself.' });
+      for (let i = 0; i < 300; i++) {
+        await new Promise((w) => setTimeout(w, 3000));
+        const st = await api('buy-status', { ref: r.ref }).catch(() => null);
+        if (st?.status === 'paid') { onPaid(); return; }
+        if (st?.status === 'failed') { setMsg({ text: st.error ? `The payment did not go through (${st.error}).` : 'The payment did not go through.', bad: true }); return; }
+      }
+    } catch (e) { setMsg({ text: e.message, bad: true }); } finally { setBusy(false); }
+  };
+  return (
+    <div className="space-y-2 rounded-xl bg-paper-100 p-3 dark:bg-night-800">
+      <input className="field" value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder={abroad ? 'Church phone with country code, e.g. +44…' : 'Church phone number'} aria-label={`Phone for ${item.title}`} />
+      {abroad && <input className="field" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail for the card receipt" aria-label={`E-mail for ${item.title}`} />}
+      <button onClick={pay} disabled={busy || !phone.trim()} className="btn w-full bg-green-600 text-sm text-white">{busy ? 'Waiting for the payment…' : `Pay ${money(item.currency, item.price)} by card`}</button>
+      <Agree />
+      {msg && <p role={msg.bad ? 'alert' : 'status'} className={`text-sm ${msg.bad ? 'text-red-600 dark:text-red-400' : 'text-stone-600 dark:text-stone-300'}`}>{msg.text}</p>}
     </div>
   );
 }
@@ -144,7 +178,7 @@ export default function StoreSheet({ onClose }) {
                   : owned ? <button onClick={() => get(it)} disabled={working === it.id} className="btn-gold w-full text-sm"><Download size={16} /> {working === it.id ? 'Downloading…' : `Get${it.file_size ? ` (${mb(it.file_size)})` : ''}`}</button>
                   : waiting ? <div className="flex items-center gap-1 text-sm font-semibold text-amber-700 dark:text-amber-400"><Clock size={16} /> Waiting for confirmation…</div>
                   : STORE ? (prices[pid(it)] ? <button onClick={() => appleBuy(it)} disabled={working === it.id} className="btn w-full bg-green-600 text-sm text-white">{working === it.id ? 'Buying…' : `Buy ${prices[pid(it)]}`}</button> : <p className="text-xs text-stone-500">Not available here yet.</p>)
-                  : buying === it.id ? <BuyForm item={it} onSent={() => { setBuying(''); refresh(); }} />
+                  : buying === it.id ? (st.policy?.momo ? <BuyForm item={it} onSent={() => { setBuying(''); refresh(); }} /> : <CardBuy item={it} onPaid={() => { setBuying(''); refresh(); }} />)
                   : (
                     <>
                       {declined && <p className="text-xs text-red-600 dark:text-red-400">Not approved{declined.reason ? `: ${declined.reason}` : ''}.</p>}

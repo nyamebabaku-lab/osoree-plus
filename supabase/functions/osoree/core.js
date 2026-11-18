@@ -28,8 +28,29 @@ export async function settings(d) {
 }
 
 // What the app may know: prices, which features are Pro, trial length, who to call.
+/**
+ * Ghana or abroad. The internet address (ipinfo.io) and, on Android, the SIM card must both say Ghana for Ghana
+ * prices; without an address lookup the phone's own SIM/region/time zone decide.
+ */
+export function regionOf({ ipCountry, sim, timezone }) {
+  const up = (x) => String(x || '').toUpperCase();
+  if (ipCountry) return up(ipCountry) === 'GH' && (!sim || up(sim) === 'GH') ? 'GH' : 'INTL';
+  // No address lookup: the SIM card, then the time zone. (Not the language setting: many phones in Ghana use "English (US)".)
+  if (sim) return up(sim) === 'GH' ? 'GH' : 'INTL';
+  if (timezone) return timezone === 'Africa/Accra' ? 'GH' : 'INTL';
+  return 'GH'; // nothing known (older app versions): Ghana, the home market
+}
+async function regionFor(d, extra, b) {
+  let ipCountry = '';
+  try { if (d.geo && extra?.ip) ipCountry = (await d.geo(extra.ip)) || ''; } catch { /* lookup down: phone decides */ }
+  return { region: regionOf({ ipCountry, sim: b.sim, country: b.country, timezone: b.timezone }), ipCountry };
+}
 const support = (s) => ({ help: s.dealer || '', email: s.supportEmail || '', whatsapp: s.supportWhatsapp || '' });
-const publicConfig = (s) => ({ support: support(s), trialDays: s.trialDays, pro: s.pro, currency: s.currency, prices: s.prices, provider: s.testMode ? 'test' : s.provider, dealer: s.dealer || '', products: PRODUCTS,
+const publicConfig = (s, region = 'GH') => (region !== 'GH' ? {
+  // Abroad: US dollars and card only (never the Ghana prices, never MoMo).
+  support: support(s), trialDays: s.trialDays, pro: s.pro, region, currency: 'USD', prices: s.pricesUSD || { pro: 0, year: 0 },
+  provider: s.testMode ? 'test' : 'paystack', dealer: s.dealer || '', products: PRODUCTS, onlinePay: true, momo: null,
+} : { region: 'GH', support: support(s), trialDays: s.trialDays, pro: s.pro, currency: s.currency, prices: s.prices, provider: s.testMode ? 'test' : s.provider, dealer: s.dealer || '', products: PRODUCTS,
   onlinePay: s.onlinePay !== false, momo: s.momoNumber ? { number: s.momoNumber, name: s.momoName || '', network: s.momoNetwork || '' } : null });
 
 async function issue(d, { device, product, church, phone, source, sourceRef, until }) {
@@ -67,7 +88,7 @@ async function updateFor(d, platform, version) {
   return { version: latest.version, required: newer.some((r) => r.required), notes: latest.notes || '', url: latest.url || '' };
 }
 
-async function hello(d, { device, platform, version, licenceIds = [], model, os, country, timezone, features }) {
+async function hello(d, { device, platform, version, licenceIds = [], model, os, country, timezone, features, sim }, extra = {}) {
   need(DEVICE.test(device || ''), 'Bad device code.');
   const rows = await d.query(`insert into devices (code, platform, version, model, os, country, timezone) values ($1, $2, $3, $4, $5, $6, $7)
     on conflict (code) do update set last_seen = now(), platform = excluded.platform, version = excluded.version,
@@ -84,6 +105,8 @@ async function hello(d, { device, platform, version, licenceIds = [], model, os,
     }
   }
   const s = await settings(d);
+  const { region, ipCountry } = await regionFor(d, extra, { sim, country, timezone });
+  await d.query('update devices set ip_country = coalesce($2, ip_country), sim_country = coalesce($3, sim_country) where code = $1', [device, ipCountry || null, clip(sim, 4) || null]);
   let blocked = rows[0].blocked;
   let l = await activeLicence(d, device);
   // Blocked because the trial ended, and now the device has Pro: it unblocks by itself.
@@ -93,22 +116,36 @@ async function hello(d, { device, platform, version, licenceIds = [], model, os,
   // Licences on this phone that were revoked or moved elsewhere are no longer valid.
   const ids = (Array.isArray(licenceIds) ? licenceIds : []).filter((x) => typeof x === 'string').slice(0, 10);
   const dead = ids.length ? (await d.query("select id from licences where id = any($1) and status <> 'active'", [ids])).map((r) => r.id) : [];
-  return { trialStart: Math.floor(new Date(rows[0].first_seen) / 1000), licence: l?.token || null, revoked: dead, config: publicConfig(s), block, update: await updateFor(d, platform, version) };
+  return { trialStart: Math.floor(new Date(rows[0].first_seen) / 1000), licence: l?.token || null, revoked: dead, config: publicConfig(s, region), block, update: await updateFor(d, platform, version) };
 }
 
 /** Starts a payment and returns where to pay (Paystack or Hubtel checkout page; a test page in test mode). */
-async function buy(d, { device, product, phone, email, church }) {
+async function buy(d, { device, product, phone, email, church, itemId, sim, country, timezone }, extra = {}) {
   need(DEVICE.test(device || ''), 'Bad device code.');
-  need(PRODUCTS[product], 'Choose Pro or Pro for one year.');
-  const ph = phoneOf(phone);
-  need(ph, 'Enter the phone number to link to this purchase (for restoring it later).');
   const s = await settings(d);
-  const amount = Number(s.prices?.[product]);
-  need(amount > 0, 'This product is not on sale yet.');
-  const provider = s.testMode ? 'test' : s.provider;
+  const { region } = await regionFor(d, extra, { sim, country, timezone });
+  let item = null;
+  if (itemId) {
+    [item] = await d.query('select * from store_items where id = $1 and active', [itemId]);
+    need(item, 'This item is no longer in the store.', 404);
+    product = 'item';
+  } else need(PRODUCTS[product], 'Choose Pro or Pro for one year.');
+  const ph = phoneOf(phone) || (region !== 'GH' ? String(phone || '').replace(/[^\d+]/g, '').slice(0, 20) : '');
+  need(ph, 'Enter the phone number to link to this purchase (for restoring it later).');
+  // The price: GH₵ in Ghana, US$ everywhere else (as set by the Super Admin).
+  const list = region === 'GH' ? Number(item ? item.price : s.prices?.[product]) : Number(item ? item.price_usd : s.pricesUSD?.[product]);
+  const listCur = region === 'GH' ? (s.currency || 'GHS') : 'USD';
+  need(list > 0, region === 'GH' ? 'This product is not on sale yet.' : 'This product is not on sale in your country yet.');
+  const provider = s.testMode ? 'test' : region === 'GH' ? s.provider : 'paystack';
+  // Card in US$ when Paystack has US$ switched on; otherwise the US$ price is charged in GH₵ at the admin's rate.
+  const usdDirect = region !== 'GH' && s.paystackUSD;
+  const rate = Number(s.usdRate) || 0;
+  need(region === 'GH' || usdDirect || rate > 0 || provider === 'test', 'Card payments from your country are not set up yet. Contact us for help.', 503);
+  const amount = region === 'GH' || usdDirect || provider === 'test' ? list : Math.round(list * rate * 100) / 100;
+  const currency = region === 'GH' ? listCur : usdDirect || provider === 'test' ? 'USD' : 'GHS';
   const id = 'P' + d.random(12);
-  await d.query('insert into payments (id, device_code, product, amount, currency, phone, email, church, provider) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
-    [id, device, product, amount, s.currency || 'GHS', ph, email || null, church || null, provider]);
+  await d.query('insert into payments (id, device_code, product, amount, currency, phone, email, church, provider, list_amount, list_currency, region, item_id) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
+    [id, device, product, amount, currency, ph, email || null, church || null, provider, list, listCur, region, item?.id || null]);
   const fn = d.env('FN_URL');
   const done = `${fn}/done?ref=${id}`;
   let url;
@@ -117,7 +154,7 @@ async function buy(d, { device, product, phone, email, church }) {
   } else if (provider === 'paystack') {
     const r = await d.fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST', headers: { Authorization: `Bearer ${d.env('PAYSTACK_SECRET_KEY')}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email || `${ph}@osoree.app`, amount: Math.round(amount * 100), currency: s.currency || 'GHS', reference: id, channels: ['mobile_money', 'card'], callback_url: done, metadata: { device, product } }),
+      body: JSON.stringify({ email: email || `${String(ph).replace(/\D/g, '')}@osoree.app`, amount: Math.round(amount * 100), currency, reference: id, channels: region === 'GH' ? ['mobile_money', 'card'] : ['card'], callback_url: done, metadata: { device, product, item: item?.id || '', region, list: `${list} ${listCur}` } }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.status) { await fail(d, id, j.message || 'Paystack refused'); throw new Fail(j.message || 'Paystack could not start the payment.', 502); }
@@ -125,14 +162,14 @@ async function buy(d, { device, product, phone, email, church }) {
   } else if (provider === 'hubtel') {
     const r = await d.fetch('https://payproxyapi.hubtel.com/items/initiate', {
       method: 'POST', headers: { Authorization: `Basic ${btoa(`${d.env('HUBTEL_API_ID')}:${d.env('HUBTEL_API_KEY')}`)}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ totalAmount: amount, description: PRODUCTS[product], callbackUrl: `${fn}/webhook?p=hubtel&k=${d.env('WEBHOOK_SECRET')}`, returnUrl: done, cancellationUrl: done, merchantAccountNumber: d.env('HUBTEL_POS_SALES_ID'), clientReference: id }),
+      body: JSON.stringify({ totalAmount: amount, description: item ? item.title : PRODUCTS[product], callbackUrl: `${fn}/webhook?p=hubtel&k=${d.env('WEBHOOK_SECRET')}`, returnUrl: done, cancellationUrl: done, merchantAccountNumber: d.env('HUBTEL_POS_SALES_ID'), clientReference: id }),
     });
     const j = await r.json().catch(() => ({}));
     const checkout = j.data?.checkoutUrl || j.Data?.CheckoutUrl;
     if (!r.ok || !checkout) { await fail(d, id, j.message || j.Message || 'Hubtel refused'); throw new Fail(j.message || j.Message || 'Hubtel could not start the payment.', 502); }
     url = checkout;
   } else throw new Fail('No payment provider is set up.', 503);
-  return { ref: id, url, amount, currency: s.currency || 'GHS' };
+  return { ref: id, url, amount: list, currency: listCur };
 }
 
 async function fail(d, id, error) { await d.query("update payments set status = 'failed', error = $2 where id = $1 and status = 'pending'", [id, String(error).slice(0, 300)]); }
@@ -145,6 +182,13 @@ async function settle(d, id, providerRef) {
     return p?.token || null; // already settled (webhook and app both asked)
   }
   const p = claimed[0];
+  if (p.item_id) {
+    // a store item: owned by the church's number, like an approved MoMo request
+    await d.query("insert into licence_requests (id, device_code, product, amount, currency, phone, momo_ref, status, decided_at, item_id, note) values ($1,$2,'item',$3,$4,$5,$6,'approved',now(),$7,'card')",
+      ['R' + d.random(10), p.device_code, Number(p.list_amount ?? p.amount), p.list_currency || p.currency, p.phone, p.id, p.item_id]);
+    await d.query('insert into device_phones (device_code, phone) values ($1, $2) on conflict do nothing', [p.device_code, p.phone]);
+    return 'item';
+  }
   const lic = await issue(d, { device: p.device_code, product: p.product, church: p.church, phone: p.phone, source: 'payment', sourceRef: p.id });
   await d.query('update payments set licence_id = $2 where id = $1', [id, lic.id]);
   return lic.token;
@@ -174,11 +218,11 @@ async function buyStatus(d, { ref }) {
   need(p, 'Payment not found.', 404);
   if (p.status === 'pending') {
     const token = await verify(d, p);
-    if (token) return { status: 'paid', licence: token };
+    if (token) return { status: 'paid', licence: token === 'item' ? undefined : token, item: p.item_id || undefined };
     const [again] = await d.query('select status, error from payments where id = $1', [p.id]);
     return { status: again.status, error: again.error || undefined };
   }
-  return { status: p.status, licence: p.token || undefined, error: p.error || undefined };
+  return { status: p.status, licence: p.token || undefined, item: p.item_id || undefined, error: p.error || undefined };
 }
 
 /** Provider calls. Paystack signs its webhooks; Hubtel's are re-checked with Hubtel before anything is accepted. */
@@ -319,6 +363,9 @@ const ADMIN = {
     if (b.trialDays != null) { need(Number.isInteger(b.trialDays) && b.trialDays >= 0 && b.trialDays <= 365, 'Trial: 0 to 365 days.'); next.trialDays = b.trialDays; }
     if (b.pro) { need(Array.isArray(b.pro) && b.pro.every((f) => ['stream', 'live', 'wifi', 'docs', 'watermark', 'backup', 'listen'].includes(f)), 'Unknown feature.'); next.pro = b.pro; }
     if (b.prices) { for (const [k, v] of Object.entries(b.prices)) need(PRODUCTS[k] && Number(v) >= 0 && Number(v) < 100000, 'Bad price.'); next.prices = { ...cur.prices, ...Object.fromEntries(Object.entries(b.prices).map(([k, v]) => [k, Number(v)])) }; }
+    if (b.pricesUSD) { for (const [k, v] of Object.entries(b.pricesUSD)) need(PRODUCTS[k] && Number(v) >= 0 && Number(v) < 10000, 'Bad US$ price.'); next.pricesUSD = { ...(cur.pricesUSD || {}), ...Object.fromEntries(Object.entries(b.pricesUSD).map(([k, v]) => [k, Number(v)])) }; }
+    if (b.paystackUSD != null) next.paystackUSD = !!b.paystackUSD;
+    if (b.usdRate != null) { need(Number(b.usdRate) >= 0 && Number(b.usdRate) < 1000, 'Bad exchange rate.'); next.usdRate = Number(b.usdRate); }
     if (b.provider) { need(['paystack', 'hubtel'].includes(b.provider), 'Provider: paystack or hubtel.'); next.provider = b.provider; }
     if (b.testMode != null) next.testMode = !!b.testMode;
     if (b.movesPerYear != null) { need(Number.isInteger(b.movesPerYear) && b.movesPerYear >= 0 && b.movesPerYear <= 12, 'Moves: 0 to 12 a year.'); next.movesPerYear = b.movesPerYear; }
@@ -342,14 +389,15 @@ const ADMIN = {
       (select count(*)::int from devices) devices,
       (select count(*)::int from devices where last_seen > now() - interval '30 days') active30,
       (select count(*)::int from licences where status = 'active' and (expires_at is null or expires_at > now())) licences,
-      (select coalesce(sum(amount), 0)::float from payments where status = 'paid' and provider <> 'test') revenue,
-      (select coalesce(sum(amount), 0)::float from payments where status = 'paid' and provider <> 'test' and paid_at > date_trunc('month', now())) revenue_month,
+      (select coalesce(sum(amount), 0)::float from payments where status = 'paid' and provider <> 'test' and coalesce(list_currency, currency) = 'GHS') revenue,
+      (select coalesce(sum(coalesce(list_amount, amount)), 0)::float from payments where status = 'paid' and provider <> 'test' and coalesce(list_currency, currency) = 'USD') revenue_usd,
+      (select coalesce(sum(amount), 0)::float from payments where status = 'paid' and provider <> 'test' and coalesce(list_currency, currency) = 'GHS' and paid_at > date_trunc('month', now())) revenue_month,
       (select count(*)::int from payments where status = 'paid' and provider = 'test') test_sales,
       (select count(*)::int from licence_requests where status = 'pending') pending_requests,
       (select count(*)::int from devices dv where not dv.blocked and dv.last_seen > now() - interval '60 days' and dv.first_seen < now() - make_interval(days => $1::int)
          and not exists (select 1 from licences l where l.device_code = dv.code and l.status = 'active' and (l.expires_at is null or l.expires_at > now()))) trials_ended,
-      (select coalesce(sum(amount), 0)::float from licence_requests where status = 'approved') momo_revenue,
-      (select coalesce(sum(amount), 0)::float from licence_requests where status = 'approved' and decided_at > date_trunc('month', now())) momo_revenue_month`, [Number((await settings(d)).trialDays ?? 30)]);
+      (select coalesce(sum(amount), 0)::float from licence_requests where status = 'approved' and currency = 'GHS' and coalesce(note, '') <> 'card') momo_revenue,
+      (select coalesce(sum(amount), 0)::float from licence_requests where status = 'approved' and currency = 'GHS' and coalesce(note, '') <> 'card' and decided_at > date_trunc('month', now())) momo_revenue_month`, [Number((await settings(d)).trialDays ?? 30)]);
     return x;
   },
   async payments(d, b) { return d.query('select * from payments order by created_at desc limit $1', [Math.min(500, b.limit || 100)]); },
@@ -450,19 +498,19 @@ const ADMIN = {
     await d.query("update licence_requests set status = 'declined', reason = $2, decided_at = now() where id = $1", [b.id, String(b.reason || '').trim().slice(0, 200) || null]);
     return { ok: true };
   },
-  async storeItems(d) { return (await d.query('select * from store_items order by kind, sort, created_at desc')).map((i) => ({ ...i, price: Number(i.price), file_size: Number(i.file_size || 0) })); },
+  async storeItems(d) { return (await d.query('select * from store_items order by kind, sort, created_at desc')).map((i) => ({ ...i, price: Number(i.price), price_usd: Number(i.price_usd || 0), file_size: Number(i.file_size || 0) })); },
   async storeSave(d, b) {
     need(['bible', 'background'].includes(b.kind), 'Kind: bible or background.');
     need(String(b.title || '').trim(), 'Give the item a title.');
     need(Number(b.price) >= 0 && Number(b.price) < 100000, 'Bad price.');
     const id = b.id || (b.kind === 'bible' ? 'B' : 'G') + d.random(9);
     const f = { title: String(b.title).trim().slice(0, 80), abbr: b.abbr ? String(b.abbr).trim().slice(0, 16) : null, lang: b.lang ? String(b.lang).slice(0, 40) : null,
-      description: b.description ? String(b.description).slice(0, 300) : null, copyright: b.copyright ? String(b.copyright).slice(0, 300) : null, price: Number(b.price) || 0,
+      description: b.description ? String(b.description).slice(0, 300) : null, copyright: b.copyright ? String(b.copyright).slice(0, 300) : null, price: Number(b.price) || 0, priceUsd: Number(b.price_usd) || 0,
       thumb: b.thumb && String(b.thumb).startsWith('data:image/') && b.thumb.length < 200000 ? b.thumb : null, active: !!b.active, sort: Number(b.sort) || 0,
       apple: b.apple_product ? String(b.apple_product).trim().slice(0, 100) : null, google: b.google_product ? String(b.google_product).trim().slice(0, 100) : null };
-    await d.query(`insert into store_items (id, kind, title, abbr, lang, description, copyright, price, thumb, active, sort, apple_product, google_product) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-      on conflict (id) do update set title = $3, abbr = $4, lang = $5, description = $6, copyright = $7, price = $8, thumb = coalesce($9, store_items.thumb), active = $10, sort = $11, apple_product = $12, google_product = $13`,
-      [id, b.kind, f.title, f.abbr, f.lang, f.description, f.copyright, f.price, f.thumb, f.active, f.sort, f.apple, f.google]);
+    await d.query(`insert into store_items (id, kind, title, abbr, lang, description, copyright, price, thumb, active, sort, apple_product, google_product, price_usd) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+      on conflict (id) do update set title = $3, abbr = $4, lang = $5, description = $6, copyright = $7, price = $8, thumb = coalesce($9, store_items.thumb), active = $10, sort = $11, apple_product = $12, google_product = $13, price_usd = $14`,
+      [id, b.kind, f.title, f.abbr, f.lang, f.description, f.copyright, f.price, f.thumb, f.active, f.sort, f.apple, f.google, f.priceUsd]);
     return { id };
   },
   /** Where the admin app uploads the item's file (a one-time signed address in the private bucket). */
@@ -482,7 +530,7 @@ const ADMIN = {
   async smsLog(d) { return d.query('select phone, ok, reply, created_at from sms_log order by id desc limit 50'); },
   async recent(d) {
     return {
-      payments: await d.query("select id, device_code, product, amount, currency, phone, church, provider, status, created_at, paid_at from payments order by created_at desc limit 20"),
+      payments: await d.query("select id, device_code, product, amount, currency, list_amount, list_currency, region, phone, church, provider, status, created_at, paid_at from payments order by created_at desc limit 20"),
       smsProblems: await d.query('select phone, reply, created_at from sms_log where not ok order by id desc limit 5'),
     };
   },
@@ -491,8 +539,9 @@ const ADMIN = {
 // ----------------------------------------------------------------------------------------------- licence requests
 
 /** A church that paid by Mobile Money asks for Pro; the Super Admin approves it in the admin app. */
-async function request(d, { device, product, phone, church, momoRef, note, itemId }) {
+async function request(d, { device, product, phone, church, momoRef, note, itemId, sim, country, timezone }, extra = {}) {
   need(DEVICE.test(device || ''), 'Bad device code.');
+  need((await regionFor(d, extra, { sim, country, timezone })).region === 'GH', 'Mobile Money is for churches in Ghana. Please pay by card.', 403);
   let item = null;
   if (itemId) {
     [item] = await d.query('select * from store_items where id = $1 and active', [itemId]);
@@ -535,13 +584,21 @@ async function owned(d, device) {
     where p.device_code = $1 and r.status = 'approved' and r.item_id is not null`, [device]);
   return rows.map((r) => r.item_id);
 }
-async function store(d, { device }) {
+async function store(d, { device, sim, country, timezone }, extra = {}) {
   need(DEVICE.test(device || ''), 'Bad device code.');
-  const items = (await d.query(`select ${ITEM_COLS} from store_items where active order by kind, sort, title`)).map((i) => ({ ...i, price: Number(i.price), file_size: Number(i.file_size || 0) }));
+  const { region } = await regionFor(d, extra, { sim, country, timezone });
+  const mine = await owned(d, device);
+  // Abroad: US$ prices; paid items without a US$ price are not sold there (unless the church already owns them).
+  const items = (await d.query(`select ${ITEM_COLS}, price_usd from store_items where active order by kind, sort, title`)).flatMap((i) => {
+    const paid = Number(i.price) > 0, usd = Number(i.price_usd) || 0;
+    if (region !== 'GH' && paid && !usd && !mine.includes(i.id)) return []; // not sold abroad
+    const price = region === 'GH' ? Number(i.price) : paid ? (usd || null) : 0;
+    return [{ ...i, price, currency: region === 'GH' ? (i.currency || 'GHS') : 'USD', price_usd: undefined, file_size: Number(i.file_size || 0) }];
+  });
   const pending = (await d.query("select item_id from licence_requests where device_code = $1 and status = 'pending' and item_id is not null", [device])).map((r) => r.item_id);
   const declined = await d.query("select distinct on (item_id) item_id, status, reason from licence_requests where device_code = $1 and item_id is not null order by item_id, created_at desc", [device]);
   const phones = (await d.query('select phone from device_phones where device_code = $1', [device])).map((r) => r.phone);
-  return { items, owned: await owned(d, device), pending, declined: declined.filter((x) => x.status === 'declined').map((x) => ({ id: x.item_id, reason: x.reason })), phones };
+  return { region, items, owned: mine, pending, declined: declined.filter((x) => x.status === 'declined').map((x) => ({ id: x.item_id, reason: x.reason })), phones };
 }
 async function storeDownload(d, { device, itemId }) {
   need(DEVICE.test(device || ''), 'Bad device code.');
@@ -643,20 +700,20 @@ async function google(d, { device, productId, token }) {
 /** One entry point: route, body, the signed-in user (admin routes) and the raw request bits (webhooks). */
 export async function handle(d, route, body = {}, extra = {}) {
   switch (route) {
-    case 'config': return publicConfig(await settings(d));
-    case 'hello': return hello(d, body);
-    case 'buy': return buy(d, body);
+    case 'config': return publicConfig(await settings(d), (await regionFor(d, extra, body)).region);
+    case 'hello': return hello(d, body, extra);
+    case 'buy': return buy(d, body, extra);
     case 'buy-status': return buyStatus(d, body);
     case 'redeem': return redeem(d, body);
     case 'restore-start': return restoreStart(d, body);
     case 'restore-finish': return restoreFinish(d, body);
     case 'webhook': return webhook(d, extra);
     case 'test-pay': return testPay(d, body);
-    case 'request': return request(d, body);
+    case 'request': return request(d, body, extra);
     case 'request-status': return requestStatus(d, body);
     case 'apple': return apple(d, body);
     case 'google': return google(d, body);
-    case 'store': return store(d, body);
+    case 'store': return store(d, body, extra);
     case 'store-download': return storeDownload(d, body);
     case 'store-link': return storeLink(d, body);
     default: {

@@ -160,7 +160,13 @@ export function UpdateSection() {
           <input type="checkbox" checked={autoUpdate} onChange={(e) => setLicState({ autoUpdate: e.target.checked })} className="h-5 w-5 accent-gold-500" aria-label="Update automatically" />
         </label>
       )}
-      <a href="https://nyamebabaku-lab.github.io/osoree-plus/privacy.html" target="_blank" rel="noreferrer" onClick={(e) => { if (IS_NATIVE) { e.preventDefault(); Screen.openUrl({ url: e.currentTarget.href }); } }} className="flex items-center gap-1 text-sm font-semibold text-gold-600 dark:text-gold-400"><ShieldCheck size={16} /> Privacy policy</a>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-semibold text-gold-600 dark:text-gold-400">
+        <ShieldCheck size={16} />
+        {[['terms.html', 'Terms and Conditions'], ['privacy.html', 'Privacy Policy'], ['licenses.html', 'Copyright notices']].map(([f, t]) => (
+          <a key={f} href={`https://nyamebabaku-lab.github.io/osoree-plus/${f}`} target="_blank" rel="noreferrer" onClick={(e) => { if (IS_NATIVE) { e.preventDefault(); Screen.openUrl({ url: e.currentTarget.href }); } }} className="underline-offset-2 hover:underline">{t}</a>
+        ))}
+      </div>
+      <p className="text-xs text-stone-500 dark:text-stone-400">© 2026 Brands Media, Ghana. All rights reserved. Ɔsɔreɛ Plus {__APP_VERSION__}.</p>
     </section>
   );
 }

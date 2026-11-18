@@ -62,8 +62,23 @@ const google = env('GOOGLE_PLAY_SERVICE_ACCOUNT') ? {
     await fetch(playUrl(productId, token) + ':acknowledge', { method: 'POST', headers: { Authorization: `Bearer ${await playAccessToken()}`, 'Content-Type': 'application/json' }, body: '{}' });
   },
 } : null;
+// Country of the internet address (ipinfo.io Lite: country only; secret IPINFO_TOKEN). Cached a day per address.
+const geoCache = new Map<string, { c: string; t: number }>();
+async function geo(ip: string) {
+  const token = env('IPINFO_TOKEN');
+  if (!token || !ip || /^(10\.|127\.|192\.168\.|::1)/.test(ip)) return '';
+  const hit = geoCache.get(ip);
+  if (hit && Date.now() - hit.t < 86400000) return hit.c;
+  const r = await fetch(`https://api.ipinfo.io/lite/${encodeURIComponent(ip)}?token=${token}`, { signal: AbortSignal.timeout(2500) });
+  if (!r.ok) return '';
+  const c = String((await r.json()).country_code || '').toUpperCase();
+  if (geoCache.size > 5000) geoCache.clear();
+  geoCache.set(ip, { c, t: Date.now() });
+  return c;
+}
 const deps = {
   storage,
+  geo,
   google,
   apple: appleVerifier(x509),
   query: (text: string, params: unknown[] = []) => sql.unsafe(text, params as never[]),
@@ -116,7 +131,8 @@ When a church moves its Ɔsɔreɛ Plus Pro licence to a new phone, we send a one
     }
     const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
     const user = route.startsWith('admin/') ? await signedInUser(req) : null;
-    return json(await handle(deps, route, body, { user }));
+    const ip = (req.headers.get('cf-connecting-ip') || req.headers.get('x-forwarded-for') || '').split(',')[0].trim();
+    return json(await handle(deps, route, body, { user, ip }));
   } catch (e) {
     const status = e instanceof Fail ? e.status : 500;
     if (status === 500) console.error(e);

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import * as ed from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha2.js';
-import { ALPHABET, handle } from '../supabase/functions/osoree/core.js';
+import { ALPHABET, handle, regionOf } from '../supabase/functions/osoree/core.js';
 ed.hashes.sha512 = sha512;
 
 let pass = 0, fail = 0;
@@ -270,6 +270,56 @@ const hbT2 = await call('hello', { device: T2, platform: 'android', version: '1.
 ok('Pro arrives: the trial block lifts by itself', !hbT2.block && !!hbT2.licence);
 await call('admin/blockDevice', { device: T3, reason: 'Misuse' }, boss);
 ok('a hand block stays even with Pro', (await call('hello', { device: T3, platform: 'android', version: '1.9.0' })).block?.kind === 'admin');
+
+// ---- prices by region: Ghana (GH₵, MoMo + card) and abroad (US$, card only)
+ok('region: address and SIM both Ghana', regionOf({ ipCountry: 'GH', sim: 'gh' }) === 'GH');
+ok('region: Ghana SIM abroad → abroad', regionOf({ ipCountry: 'NG', sim: 'GH' }) === 'INTL');
+ok('region: Ghana address, foreign SIM → abroad', regionOf({ ipCountry: 'GH', sim: 'US' }) === 'INTL');
+ok('region: no lookup, SIM or time zone decide', regionOf({ sim: 'GH', timezone: 'Europe/London' }) === 'GH' && regionOf({ timezone: 'Africa/Accra' }) === 'GH' && regionOf({ timezone: 'Europe/London' }) === 'INTL');
+ok('region: an "English (US)" phone in Ghana stays Ghana', regionOf({ country: 'US', timezone: 'Africa/Accra' }) === 'GH');
+const geoMap = { '41.66.1.1': 'GH', '81.2.69.1': 'GB' };
+d.geo = async (ip) => geoMap[ip] || '';
+const GHip = { ip: '41.66.1.1' }, UKip = { ip: '81.2.69.1' };
+await call('admin/saveSettings', { prices: { pro: 350, year: 250 }, pricesUSD: { pro: 49, year: 29 }, testMode: false, provider: 'paystack', usdRate: 15.5, paystackUSD: false, momoNumber: '0241234567' }, boss);
+const callX = async (route, body, extra) => { try { return await handle(d, route, body, extra); } catch (e) { return { error: e.message, status: e.status }; } };
+const UK = 'OSR-UUUU-KKKK-2345', GHd = 'OSR-GGGG-2345-6789';
+const cfgUK = (await callX('hello', { device: UK, platform: 'windows', version: '1.9.1' }, UKip)).config;
+ok('abroad: US$ prices, card only, no MoMo, no Ghana prices', cfgUK.region === 'INTL' && cfgUK.currency === 'USD' && cfgUK.prices.pro === 49 && !cfgUK.momo && !JSON.stringify(cfgUK.prices).includes('350'), JSON.stringify(cfgUK).slice(0, 160));
+const cfgGH = (await callX('hello', { device: GHd, platform: 'android', version: '1.9.1', sim: 'gh' }, GHip)).config;
+ok('Ghana: GH₵ prices and MoMo', cfgGH.region === 'GH' && cfgGH.prices.pro === 350 && cfgGH.momo?.number === '0241234567');
+calls.length = 0;
+fakeProvider.fn = (u) => (u.includes('/initialize') ? { json: { status: true, data: { authorization_url: 'https://checkout.paystack.com/x' } } } : {});
+const bUK = await callX('buy', { device: UK, product: 'pro', phone: '+44 7700 900123' }, UKip);
+const initUK = JSON.parse(calls.find((c) => c.u.includes('/initialize')).o.body);
+ok('abroad: card only, US$ 49 charged as GH₵ at the admin rate', bUK.currency === 'USD' && bUK.amount === 49 && initUK.currency === 'GHS' && initUK.amount === Math.round(49 * 15.5 * 100) && JSON.stringify(initUK.channels) === '["card"]', JSON.stringify(initUK).slice(0, 200));
+const pUK = (await d.query('select * from payments where id = $1', [bUK.ref]))[0];
+ok('payment keeps the US$ price and what was charged', Number(pUK.list_amount) === 49 && pUK.list_currency === 'USD' && pUK.currency === 'GHS' && pUK.region === 'INTL');
+await call('admin/saveSettings', { paystackUSD: true }, boss);
+calls.length = 0;
+await callX('buy', { device: UK, product: 'year', phone: '+44 7700 900123' }, UKip);
+const initUK2 = JSON.parse(calls.find((c) => c.u.includes('/initialize')).o.body);
+ok('with US$ on Paystack: charged in US$', initUK2.currency === 'USD' && initUK2.amount === 2900);
+calls.length = 0;
+await callX('buy', { device: GHd, product: 'pro', phone: '0241112222', sim: 'GH' }, GHip);
+const initGH = JSON.parse(calls.find((c) => c.u.includes('/initialize')).o.body);
+ok('Ghana: GH₵ 350, MoMo and card', initGH.currency === 'GHS' && initGH.amount === 35000 && initGH.channels.includes('mobile_money'));
+ok('abroad: MoMo request refused', (await callX('request', { device: UK, product: 'pro', phone: '0241112222', momoRef: '12345678' }, UKip)).error?.includes('Mobile Money is for churches in Ghana'));
+await call('admin/storeSave', { id: 'BTWI', kind: 'bible', title: 'Twi Bible', price: 120, price_usd: 9, active: true }, boss).catch(() => {});
+const tw = await call('admin/storeSave', { kind: 'bible', title: 'Twi Bible 2', price: 120, price_usd: 9, active: true }, boss);
+const ga = await call('admin/storeSave', { kind: 'bible', title: 'Ga Bible', price: 100, price_usd: 0, active: true }, boss);
+await d.query("update store_items set file_path = 'bible/x.json.gz' where id in ($1, $2)", [tw.id, ga.id]);
+const stUK = await callX('store', { device: UK }, UKip);
+ok('abroad store: US$ prices; items without a US$ price hidden', stUK.items.find((x) => x.id === tw.id)?.price === 9 && stUK.items.find((x) => x.id === tw.id).currency === 'USD' && !stUK.items.some((x) => x.id === ga.id), JSON.stringify(stUK.items.map((x) => [x.title, x.price, x.currency])));
+const stGH = await callX('store', { device: GHd, sim: 'GH' }, GHip);
+ok('Ghana store: GH₵ prices', stGH.items.find((x) => x.id === ga.id)?.price === 100);
+await call('admin/saveSettings', { testMode: true }, boss);
+const bItem = await callX('buy', { device: UK, itemId: tw.id, phone: '+44 7700 900123' }, UKip);
+await call('test-pay', { ref: bItem.ref });
+const stItem = await callX('buy-status', { ref: bItem.ref }, UKip);
+ok('store item bought by card: owned', stItem.status === 'paid' && stItem.item === tw.id && (await callX('store', { device: UK }, UKip)).owned.includes(tw.id), JSON.stringify(stItem));
+const ovR = await call('admin/overview', {}, boss);
+ok('revenue kept apart: GH₵ and US$', typeof ovR.revenue === 'number' && typeof ovR.revenue_usd === 'number', JSON.stringify({ r: ovR.revenue, u: ovR.revenue_usd }));
+d.geo = null; fakeProvider.fn = null;
 
 // ---- the public API keys can read nothing
 await pg.exec("create role anon; grant select on all tables in schema public to anon;");

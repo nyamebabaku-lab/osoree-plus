@@ -54,21 +54,21 @@ await a.waitForSelector('nav >> text=Store');
 await a.locator('nav button', { hasText: 'Store' }).click();
 await a.getByLabel('Store file').setInputFiles(path.join(root, 'tests/fixtures/TWI-TEST.xml'));
 await a.getByLabel('Item title').fill('Twi Bible (test)'); await a.getByLabel('Short name').fill('TWI'); await a.getByLabel('Language').fill('Twi (Asante)');
-await a.getByLabel('Copyright').fill('Public domain'); await a.getByLabel('Item price').fill('120');
+await a.getByLabel('Copyright').fill('Public domain'); await a.getByLabel('Item price', { exact: true }).fill('120');
 await a.getByRole('button', { name: 'Upload' }).click();
 await a.waitForSelector('text=/Saved \\(/', { timeout: 20000 });
 const bi = (await d.query("select * from store_items where kind = 'bible'"))[0];
 ok('Bible converted, uploaded and listed', bi?.file_type === 'bible-json-gz' && blobs.has(bi.file_path) && bi.price == 120 && bi.active, bi?.file_path);
 await a.getByRole('button', { name: 'Background', exact: true }).click();
 await a.getByLabel('Store file').setInputFiles(path.join(root, 'tests/out/logo.png'));
-await a.getByLabel('Item title').fill('Blue logo backdrop'); await a.getByLabel('Item price').fill('0');
+await a.getByLabel('Item title').fill('Blue logo backdrop'); await a.getByLabel('Item price', { exact: true }).fill('0');
 await a.getByRole('button', { name: 'Upload' }).click();
 await a.waitForSelector('text=/Saved\\. Churches/', { timeout: 20000 });
 const bg = (await d.query("select * from store_items where kind = 'background'"))[0];
 ok('free background uploaded with a thumbnail', bg?.thumb?.startsWith('data:image/jpeg') && blobs.has(bg.file_path) && bg.price == 0);
 // ---- a church phone
 async function phone() {
-  const ctx = await b.newContext({ viewport: { width: 400, height: 860 }, serviceWorkers: 'block' }); await wire(ctx);
+  const ctx = await b.newContext({ viewport: { width: 400, height: 860 }, serviceWorkers: 'block', timezoneId: 'Africa/Accra' }); await wire(ctx);
   const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push('app: ' + e.message));
   await p.goto('http://127.0.0.1:4871/'); await p.waitForSelector('nav'); await p.waitForTimeout(600);
   await p.locator('nav button', { hasText: 'Screen' }).click();

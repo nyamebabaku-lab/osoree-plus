@@ -165,16 +165,21 @@ function LicenceEntry({ onDone }) {
   );
 }
 
-const money = (cur, n) => `${cur === 'GHS' ? 'GH₵' : cur + ' '}${Number(n).toLocaleString()}`;
+const money = (cur, n) => `${cur === 'GHS' ? 'GH₵' : cur === 'USD' ? 'US$' : cur + ' '}${Number(n).toLocaleString()}`;
+const SITE = 'https://nyamebabaku-lab.github.io/osoree-plus/';
+const openDoc = (e) => { if (IS_NATIVE) { e.preventDefault(); Screen.openUrl({ url: e.currentTarget.href }); } };
+export const Agree = () => <p className="text-[11px] text-stone-500 dark:text-stone-400">By paying you agree to the <a href={SITE + 'terms.html'} target="_blank" rel="noreferrer" onClick={openDoc} className="underline">Terms and Conditions</a> (no refunds once activated) and the <a href={SITE + 'privacy.html'} target="_blank" rel="noreferrer" onClick={openDoc} className="underline">Privacy Policy</a>.</p>;
 
 function BuySection() {
   const { policy, deviceCode, pendingPay, setLicState } = useStore();
   const [product, setProduct] = useState('pro');
   const [phone, setPhone] = useState('');
   const [church, setChurch] = useState('');
+  const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const prices = policy?.prices;
+  const abroad = policy?.region === 'INTL';
   useEffect(() => {
     if (!pendingPay) return undefined;
     let tries = 0;
@@ -192,7 +197,7 @@ function BuySection() {
   const pay = async () => {
     setMsg(null); setBusy(true);
     try {
-      const r = await api('buy', { device: deviceCode, product: chosen, phone, church: church.trim() || undefined });
+      const r = await api('buy', { device: deviceCode, product: chosen, phone, church: church.trim() || undefined, email: email.trim() || undefined });
       setLicState({ pendingPay: r.ref });
       await openCheckout(r.url);
       setMsg({ text: 'Finish paying in the browser, then come back here. Pro switches on by itself.' });
@@ -212,9 +217,11 @@ function BuySection() {
       {online && (
         <div className="space-y-2">
           {policy.momo && <div className="label pt-1">Or pay online</div>}
-          <input className="field" value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="Your phone number (to restore Pro later)" aria-label="Phone number" />
+          <input className="field" value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder={abroad ? 'Your phone number with country code, e.g. +44…' : 'Your phone number (to restore Pro later)'} aria-label="Phone number" />
+          {abroad && <input className="field" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail for the card receipt" aria-label="E-mail for receipt" />}
           <input className="field" value={church} onChange={(e) => setChurch(e.target.value)} placeholder="Church name (optional)" aria-label="Church name" />
-          <button onClick={pay} disabled={busy || !phone.trim()} className="btn w-full bg-green-600 text-white hover:bg-green-700"><CreditCard size={16} /> {busy ? 'Starting…' : `Pay ${money(policy.currency, prices[chosen])} with MoMo or card`}</button>
+          <button onClick={pay} disabled={busy || !phone.trim()} className="btn w-full bg-green-600 text-white hover:bg-green-700"><CreditCard size={16} /> {busy ? 'Starting…' : `Pay ${money(policy.currency, prices[chosen])} ${abroad ? 'by card' : 'with MoMo or card'}`}</button>
+          <Agree />
           {policy.provider === 'test' && <p className="text-xs text-amber-700 dark:text-amber-400">Test mode: no money is taken.</p>}
           {pendingPay && <button onClick={() => checkPayment(pendingPay).then((ok) => !ok && setMsg({ text: 'Not paid yet. Finish in the browser, then try again.' })).catch((e) => setMsg({ text: e.message, bad: true }))} className="btn-soft w-full text-sm">I have paid: check now</button>}
           {msg && <p role={msg.bad ? 'alert' : 'status'} className={`text-sm ${msg.bad ? 'text-red-600 dark:text-red-400' : 'text-stone-600 dark:text-stone-300'}`}>{msg.text}</p>}
@@ -272,6 +279,7 @@ function MomoRequest({ product }) {
           <input className="field" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="MoMo transaction ID" aria-label="MoMo transaction ID" autoCapitalize="characters" autoCorrect="off" spellCheck={false} />
           <input className="field" value={church} onChange={(e) => setChurch(e.target.value)} placeholder="Church name (optional)" aria-label="Church name for the request" />
           <button onClick={send} disabled={busy || !phone.trim() || ref.trim().length < 4} className="btn w-full bg-green-600 text-white hover:bg-green-700">{busy ? 'Sending…' : 'Send Pro request'}</button>
+          <Agree />
         </>
       )}
       {msg && <p role={msg.bad ? 'alert' : 'status'} className={`text-sm ${msg.bad ? 'text-red-600 dark:text-red-400' : 'text-stone-600 dark:text-stone-300'}`}>{msg.text}</p>}
