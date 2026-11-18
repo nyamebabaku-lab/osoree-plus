@@ -361,7 +361,7 @@ const ADMIN = {
     const cur = await settings(d);
     const next = { ...cur };
     if (b.trialDays != null) { need(Number.isInteger(b.trialDays) && b.trialDays >= 0 && b.trialDays <= 365, 'Trial: 0 to 365 days.'); next.trialDays = b.trialDays; }
-    if (b.pro) { need(Array.isArray(b.pro) && b.pro.every((f) => ['stream', 'live', 'wifi', 'docs', 'watermark', 'backup', 'listen'].includes(f)), 'Unknown feature.'); next.pro = b.pro; }
+    if (b.pro) { need(Array.isArray(b.pro) && b.pro.every((f) => ['stream', 'live', 'wifi', 'docs', 'watermark', 'backup', 'listen', 'strongs'].includes(f)), 'Unknown feature.'); next.pro = b.pro; }
     if (b.prices) { for (const [k, v] of Object.entries(b.prices)) need(PRODUCTS[k] && Number(v) >= 0 && Number(v) < 100000, 'Bad price.'); next.prices = { ...cur.prices, ...Object.fromEntries(Object.entries(b.prices).map(([k, v]) => [k, Number(v)])) }; }
     if (b.pricesUSD) { for (const [k, v] of Object.entries(b.pricesUSD)) need(PRODUCTS[k] && Number(v) >= 0 && Number(v) < 10000, 'Bad US$ price.'); next.pricesUSD = { ...(cur.pricesUSD || {}), ...Object.fromEntries(Object.entries(b.pricesUSD).map(([k, v]) => [k, Number(v)])) }; }
     if (b.paystackUSD != null) next.paystackUSD = !!b.paystackUSD;

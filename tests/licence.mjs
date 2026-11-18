@@ -29,10 +29,18 @@ const proj = await page.context().newPage(); await proj.setViewportSize({ width:
 const brandOn = (p) => p.evaluate(() => { const b = document.getElementById('brand'); return getComputedStyle(b).display !== 'none' && b.textContent.includes('Free version'); });
 ok('no watermark during the trial', !(await brandOn(proj)) && !(await live()).free);
 await page.getByRole('button', { name: /Turn off live video/ }).click();
+await tab('Bible'); await page.getByLabel('Bible version').selectOption('kjvs'); await page.waitForTimeout(300);
+ok('KJV+ works during the trial', (await state()).versionId === 'kjvs');
 
 // the trial runs out
 await setState({ trialStart: now() - 31 * 86400 }); await page.reload(); await page.waitForSelector('nav');
 await page.waitForSelector('text=FREE · GET PRO'); ok('after 30 days: Free', true);
+await page.waitForTimeout(400);
+ok('trial over: a device left on KJV+ goes back to KJV', (await state()).versionId === 'kjv');
+ok('KJV+ marked Pro in the list', (await page.getByLabel('Bible version').locator('option[value="kjvs"]').innerText()).includes('(Pro)'));
+await page.getByLabel('Bible version').selectOption('kjvs'); await page.waitForTimeout(300);
+ok('choosing KJV+ opens Get Pro instead', (await state()).versionId === 'kjv' && await page.getByText('Pro includes').isVisible());
+await page.getByLabel('Close').click();
 await page.waitForTimeout(400);
 ok('trial over: "Free version" watermark on the projector', (await live()).free === true && await brandOn(proj));
 ok('…and in the phone preview', await page.frameLocator('iframe').first().locator('#brand').evaluate((b) => getComputedStyle(b).display !== 'none').catch(() => false));
@@ -69,6 +77,9 @@ ok('changed licence refused', /not genuine/.test(await tryLicence(`${h}.${Buffer
 ok('expired licence refused', /ended on/.test(await tryLicence(issue(code, '--until', '2020-01-01'))));
 ok('rubbish refused', /not an Ɔsɔreɛ Plus licence/.test(await tryLicence('hello')));
 ok('valid licence accepted', (await tryLicence(good)) === '');
+await page.getByLabel('Bible version').selectOption('kjvs'); await page.waitForTimeout(300);
+ok('with Pro: KJV+ opens', (await state()).versionId === 'kjvs');
+await page.getByLabel('Bible version').selectOption('kjv');
 await page.waitForSelector('h1 >> text=Pro');
 await page.waitForTimeout(400);
 ok('Pro activated: watermark gone everywhere', !(await live()).free && !(await brandOn(proj)));

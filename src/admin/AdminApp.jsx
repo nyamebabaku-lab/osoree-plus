@@ -507,7 +507,7 @@ function SettingsTab() {
   const s = useLoad(() => admin('settings'), []);
   const [f, setF] = useState(null);
   const [msg, setMsg] = useState(null);
-  const withDefaults = (d) => ({ trialDays: 30, pro: [], prices: { pro: 0, year: 0 }, provider: 'paystack', testMode: true, movesPerYear: 2, smsSender: '', dealer: '', momoNumber: '', momoName: '', momoNetwork: '', onlinePay: true, supportEmail: '', supportWhatsapp: '', paystackUSD: false, usdRate: 0, ...d, pricesUSD: { pro: 0, year: 0, ...(d?.pricesUSD || {}) }, prices: { pro: 0, year: 0, ...(d?.prices || {}) }, pro: Array.isArray(d?.pro) ? d.pro : [] });
+  const withDefaults = (d) => ({ trialDays: 30, provider: 'paystack', testMode: true, movesPerYear: 2, smsSender: '', dealer: '', momoNumber: '', momoName: '', momoNetwork: '', onlinePay: true, supportEmail: '', supportWhatsapp: '', paystackUSD: false, usdRate: 0, ...d, pricesUSD: { pro: 0, year: 0, ...(d?.pricesUSD || {}) }, prices: { pro: 0, year: 0, ...(d?.prices || {}) }, pro: Array.isArray(d?.pro) ? d.pro : [] });
   useEffect(() => { if (s.data) setF(withDefaults(s.data)); }, [s.data]);
   if (!f) return s.error ? <p className="text-sm text-red-600">{s.error}</p> : <Empty>Loading…</Empty>;
   const save = async () => {

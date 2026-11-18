@@ -211,7 +211,7 @@ function LivePanel({ bible, versions }) {
             <Toggle on={combine} onClick={() => s.setCombine(!combine)} label={`Combine: tapping a verse adds it to the screen (up to ${MAX_REFS})`}>Combine</Toggle>
             <select value={compareId} onChange={(e) => s.setCompare(e.target.value)} aria-label="Compare with another version" className="min-h-9 min-w-0 flex-1 rounded-xl border border-paper-300 bg-white px-2 text-sm font-semibold dark:border-night-700 dark:bg-night-800">
               <option value="">Compare</option>
-              {versions.filter((v) => v.id !== versionId).map((v) => <option key={v.id} value={v.id}>+ {v.abbr}</option>)}
+              {versions.filter((v) => v.id !== versionId).map((v) => <option key={v.id} value={v.id}>+ {v.abbr}{v.id === 'kjvs' && lockedFeatures(s.licStatus).includes('strongs') ? ' (Pro)' : ''}</option>)}
             </select>
           </div>
         )}
@@ -287,6 +287,13 @@ export default function App() {
   useEffect(() => { setExtraBookNames(bible?.bookNames); }, [bible]);
 
   // Keep every screen in step with the operator.
+  // KJV+ needs Pro after the trial: a device left on it goes back to the KJV.
+  const strongsLocked = lockedFeatures(state.licStatus).includes('strongs');
+  useEffect(() => {
+    if (!strongsLocked) return;
+    if (versionId === 'kjvs') useStore.setState({ versionId: 'kjv' });
+    if (compareId === 'kjvs') useStore.setState({ compareId: '' });
+  }, [strongsLocked, versionId, compareId]);
   const message = state.blocked ? { kind: 'black', style: {} } : bible ? screenState({ ...state, locked: lockedFeatures(state.licStatus), free: state.licStatus?.state === 'free' }, { bible, compare: compareId ? compare : null, songs, media }) : null;
   const json = message ? JSON.stringify(message) : '';
   useEffect(() => { if (json) send(JSON.parse(json)); }, [json]);
@@ -302,7 +309,7 @@ export default function App() {
       <header className="flex items-center gap-2 px-4 pb-2 pt-[max(.75rem,env(safe-area-inset-top))]">
         <h1 className="mr-auto flex items-center text-lg font-bold tracking-tight"><span>Ɔsɔreɛ <span className="text-gold-500">Plus</span></span><ProBadge /></h1>
         <select value={versionId} onChange={(e) => setVersion(e.target.value)} aria-label="Bible version" className="min-h-10 max-w-[11rem] rounded-xl border border-paper-300 bg-white px-2 text-sm font-semibold dark:border-night-700 dark:bg-night-800">
-          {versions.map((v) => <option key={v.id} value={v.id}>{v.abbr} · {v.name}</option>)}
+          {versions.map((v) => <option key={v.id} value={v.id}>{v.abbr} · {v.name}{v.id === 'kjvs' && strongsLocked ? ' (Pro)' : ''}</option>)}
         </select>
         <button onClick={() => setThemeMode(isDark ? 'light' : 'dark')} aria-label="Switch theme" className="icon-btn">{isDark ? <Sun size={18} /> : <Moon size={18} />}</button>
       </header>

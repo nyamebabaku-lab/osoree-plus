@@ -86,8 +86,9 @@ export const useStore = create(persist((set, get) => {
   camAddress: '', // camera mode: the main phone's address
   camStatus: null, // this phone's camera while live video is on: { state, screens } or { error }
 
-  setVersion: (versionId) => set({ versionId, compareId: get().compareId === versionId ? '' : get().compareId }),
-  setCompare: (compareId) => set({ compareId }),
+  // KJV+ (Strong's) is a Pro feature: during the trial it works, afterwards it needs Pro.
+  setVersion: (versionId) => { if (versionId === 'kjvs' && !allowed('strongs')) return; set({ versionId, compareId: get().compareId === versionId ? '' : get().compareId }); },
+  setCompare: (compareId) => { if (compareId === 'kjvs' && !allowed('strongs')) return; set({ compareId }); },
   setThemeMode: (themeMode) => set({ themeMode }),
   setStyle: (patch) => set({ style: { ...get().style, ...patch } }),
   setCombine: (combine) => set({ combine }),
