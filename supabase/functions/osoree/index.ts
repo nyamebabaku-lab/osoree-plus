@@ -35,8 +35,36 @@ const storage = {
     return { url: `${env('SUPABASE_URL')}/storage/v1${j.url}` };
   },
 };
+// Google Play Developer API with the service account (secret GOOGLE_PLAY_SERVICE_ACCOUNT, the JSON key file).
+const PLAY_APP = 'com.osoree.plus';
+let playToken = { value: '', until: 0 };
+async function playAccessToken() {
+  if (playToken.value && Date.now() < playToken.until) return playToken.value;
+  const sa = JSON.parse(env('GOOGLE_PLAY_SERVICE_ACCOUNT'));
+  const now = Math.floor(Date.now() / 1000);
+  const enc = (o: unknown) => btoa(JSON.stringify(o)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const unsigned = enc({ alg: 'RS256', typ: 'JWT' }) + '.' + enc({ iss: sa.client_email, scope: 'https://www.googleapis.com/auth/androidpublisher', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 });
+  const der = Uint8Array.from(atob(sa.private_key.replace(/-----[^-]+-----|\s/g, '')), (c) => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey('pkcs8', der, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
+  const sig = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(unsigned))))).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${unsigned}.${sig}` });
+  const j = await r.json(); if (!r.ok) throw new Error(j.error_description || 'Google sign-in failed');
+  playToken = { value: j.access_token, until: Date.now() + (j.expires_in - 60) * 1000 };
+  return playToken.value;
+}
+const playUrl = (productId: string, token: string) => `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${PLAY_APP}/purchases/products/${encodeURIComponent(productId)}/tokens/${encodeURIComponent(token)}`;
+const google = env('GOOGLE_PLAY_SERVICE_ACCOUNT') ? {
+  async verify(productId: string, token: string) {
+    const r = await fetch(playUrl(productId, token), { headers: { Authorization: `Bearer ${await playAccessToken()}` } });
+    const j = await r.json(); if (!r.ok) throw new Error(j.error?.message || 'not found'); return j;
+  },
+  async acknowledge(productId: string, token: string) {
+    await fetch(playUrl(productId, token) + ':acknowledge', { method: 'POST', headers: { Authorization: `Bearer ${await playAccessToken()}`, 'Content-Type': 'application/json' }, body: '{}' });
+  },
+} : null;
 const deps = {
   storage,
+  google,
   apple: appleVerifier(x509),
   query: (text: string, params: unknown[] = []) => sql.unsafe(text, params as never[]),
   now: () => new Date(),

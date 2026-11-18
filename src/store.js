@@ -70,6 +70,13 @@ export const useStore = create(persist((set, get) => {
   policy: null, // from the server: trial length, Pro features, prices, provider, dealer (kept for offline use)
   pendingPay: '', // a payment the app is waiting for (reference)
   pendingReq: '', // a Pro request (paid by MoMo) waiting for the Super Admin
+  play: false, // installed from Google Play: Pro and store items are bought with Google Play billing
+  blocked: null, // { reason, help } when the Super Admin blocked this device (kept while offline)
+  update: null, // { version, required, notes, url } newest release for this platform
+  autoUpdate: false, // download and install new versions by themselves
+  autoTried: '',
+  lastCheck: 0, // version the automatic update already tried (once per version)
+  usage: {}, // features used since the last check-in: { listen: 2 }
   listenSound: true, // scripture listener: a quiet tone with the vibration
   notifAsked: false,
   storePending: false, // a store purchase waiting for the Super Admin (the app checks every 30 s)
@@ -86,6 +93,9 @@ export const useStore = create(persist((set, get) => {
   setIdle: (idleId) => set({ idleId }),
 
   goLive: (slide) => {
+    if (slide?.type === 'pdf') get().countUse('docs');
+    else if (slide?.type === 'song') get().countUse('songs');
+    else if (slide?.type === 'verse') get().countUse('verses');
     // A name is a tag laid over whatever is showing: tapping it shows or hides the tag.
     if (slide.type === 'name') { get().toggleName(slide.personId); return; }
     if (slide.type === 'pdf' && !allowed('docs')) return;
@@ -121,7 +131,8 @@ export const useStore = create(persist((set, get) => {
     set({ live: { type: 'verse', refs: live.refs.filter((_, k) => k !== i) } });
   },
   setMode: (mode) => set({ mode }),
-  setCam: (patch) => { if (patch.on && !allowed('live')) return; set({ cam: { ...get().cam, ...patch } }); },
+  countUse: (f) => set({ usage: { ...get().usage, [f]: (get().usage[f] || 0) + 1 } }),
+  setCam: (patch) => { if (patch.on && !allowed('live')) return; if (patch.on && !get().cam.on) get().countUse('live'); set({ cam: { ...get().cam, ...patch } }); },
   setLt: (patch) => set({ lt: { ...get().lt, ...patch } }),
   setCamAddress: (camAddress) => set({ camAddress }),
   setCamStatus: (camStatus) => set({ camStatus }),

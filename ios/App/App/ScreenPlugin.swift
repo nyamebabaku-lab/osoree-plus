@@ -48,6 +48,7 @@ public class ScreenPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "iapProducts", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "iapBuy", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "iapRestore", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "installUpdate", returnType: CAPPluginReturnPromise),
     ]
 
     private var state: String?
@@ -110,11 +111,14 @@ public class ScreenPlugin: CAPPlugin, CAPBridgedPlugin {
         let key = "osoree-device-id"
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrAccount as String: key, kSecReturnData as String: true]
         var out: CFTypeRef?
-        if SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data, let id = String(data: d, encoding: .utf8) { call.resolve(["id": "ios-" + id]); return }
+        var sys = utsname(); uname(&sys)
+        let machine = withUnsafeBytes(of: &sys.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        let info: [String: Any] = ["model": machine.isEmpty ? UIDevice.current.model : machine, "os": "iOS " + UIDevice.current.systemVersion]
+        if SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data, let id = String(data: d, encoding: .utf8) { call.resolve(info.merging(["id": "ios-" + id]) { a, _ in a }); return }
         let id = UUID().uuidString
         let add: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrAccount as String: key, kSecValueData as String: Data(id.utf8), kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
         SecItemAdd(add as CFDictionary, nil)
-        call.resolve(["id": "ios-" + id])
+        call.resolve(info.merging(["id": "ios-" + id]) { a, _ in a })
     }
 
     @objc func openUrl(_ call: CAPPluginCall) {
@@ -376,6 +380,11 @@ public class ScreenPlugin: CAPPlugin, CAPBridgedPlugin {
         let id = call.getString("channel") == "scripture" ? "scripture" : UUID().uuidString
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: c, trigger: nil))
         call.resolve()
+    }
+
+    /// iPhone updates come from the App Store.
+    @objc func installUpdate(_ call: CAPPluginCall) {
+        DispatchQueue.main.async { UIApplication.shared.open(URL(string: "itms-apps://apps.apple.com/app/id" + (call.getString("appId") ?? ""))!); call.resolve() }
     }
 
     // MARK: App Store purchases (Pro)

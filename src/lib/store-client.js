@@ -51,6 +51,7 @@ export async function install(item) {
       }
       if (!useStore.getState().media.some((m) => m.store === item.id)) st.addMedia([{ id, name: item.title, kind: video ? 'video' : 'image', fit: 'cover', store: item.id, loop: video, ...entry }]);
     }
+    useStore.getState().countUse('store');
   } finally { busy.delete(item.id); }
 }
 

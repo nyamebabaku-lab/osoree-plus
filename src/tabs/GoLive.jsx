@@ -88,6 +88,7 @@ function GoLivePanel() {
       });
       setStatus(st);
       setOnAir(true);
+      useStore.getState().countUse('stream');
     } catch (e) {
       setError(e?.message || 'The stream could not start.');
     } finally {

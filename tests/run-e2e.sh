@@ -17,6 +17,7 @@ LD_LIBRARY_PATH=$HOME/.local/chromium-libs/root/usr/lib/x86_64-linux-gnu node te
 node tests/listen.mjs | tail -1
 node tests/apple.mjs | tail -1
 LD_LIBRARY_PATH=$HOME/.local/chromium-libs/root/usr/lib/x86_64-linux-gnu node tests/listen-ui.mjs
+LD_LIBRARY_PATH=$HOME/.local/chromium-libs/root/usr/lib/x86_64-linux-gnu node tests/updates-ui.mjs
 node tests/server-licences.mjs | tail -1
 LD_LIBRARY_PATH=$HOME/.local/chromium-libs/root/usr/lib/x86_64-linux-gnu node tests/admin.mjs
 LD_LIBRARY_PATH=$HOME/.local/chromium-libs/root/usr/lib/x86_64-linux-gnu node tests/store.mjs

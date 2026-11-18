@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Copy, Home, Inbox, KeyRound, LogOut, Moon, RefreshCw, Settings, Share2, ShoppingBag, Sun, Ticket, Upload, X } from 'lucide-react';
+import { Ban, Check, Copy, Home, Inbox, KeyRound, LogOut, Moon, RefreshCw, Rocket, Settings, Share2, ShoppingBag, Smartphone, Sun, Ticket, Trash2, Upload, X } from 'lucide-react';
 import { gzipSync, unzipSync } from 'fflate';
 import { decodeXml, parseXmlBible } from '../lib/bible.js';
 import { admin, sb } from './api.js';
@@ -248,7 +248,7 @@ function thumbOf(file) {
     else { const i = new window.Image(); i.onload = () => draw(i, i.naturalWidth, i.naturalHeight); i.onerror = () => resolve(null); i.src = url; }
   });
 }
-const BLANK = { kind: 'bible', title: '', abbr: '', lang: '', description: '', copyright: '', price: 0, active: true };
+const BLANK = { kind: 'bible', title: '', abbr: '', lang: '', description: '', copyright: '', price: 0, active: true, apple_product: '', google_product: '' };
 function StoreTab() {
   const list = useLoad(() => admin('storeItems'), []);
   const [f, setF] = useState(BLANK);
@@ -297,6 +297,11 @@ function StoreTab() {
         </div>}
         <input className="field" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="Description (optional)" aria-label="Description" />
         {f.kind === 'bible' && <input className="field" value={f.copyright} onChange={(e) => setF({ ...f, copyright: e.target.value })} placeholder="Copyright / licence, e.g. Public domain, or © Bible Society of Ghana, used with permission" aria-label="Copyright" />}
+        {Number(f.price) > 0 && <details className="text-xs"><summary className="cursor-pointer font-semibold">Sell on iPhone / Google Play too</summary>
+          <p className="my-1 text-stone-500">Create a matching non-consumable product in App Store Connect / Play Console, then type its product ID here. Without it, iPhone and Play Store users only see this item if their church already owns it.</p>
+          <input className="field mt-1" value={f.apple_product || ''} onChange={(e) => setF({ ...f, apple_product: e.target.value })} placeholder="App Store product ID, e.g. com.osoree.plus.bible.twi" aria-label="App Store product ID" />
+          <input className="field mt-1" value={f.google_product || ''} onChange={(e) => setF({ ...f, google_product: e.target.value })} placeholder="Google Play product ID, e.g. bible_twi" aria-label="Google Play product ID" />
+        </details>}
         <label className="block text-xs font-semibold">Price in GH₵ (0 = free, per church)<input className="field mt-1" type="number" min="0" value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} aria-label="Item price" /></label>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} className="h-4 w-4 accent-green-600" aria-label="Show in the store" />Show in the store</label>
         {f.kind === 'bible' && <p className="text-xs text-amber-700 dark:text-amber-400">Only upload Bibles you are allowed to share or sell (public domain, or with the publisher’s written permission).</p>}
@@ -316,10 +321,128 @@ function StoreTab() {
               <div className="truncate font-bold">{it.title}</div>
               <div className="text-xs text-stone-500">{it.price ? money(it.price, it.currency) : 'Free'} · {it.active ? 'showing' : 'hidden'}{it.file_path ? '' : ' · no file yet!'}</div>
             </div>
-            <button onClick={() => { setF({ ...BLANK, ...it, abbr: it.abbr || '', lang: it.lang || '', description: it.description || '', copyright: it.copyright || '' }); setFile(null); window.scrollTo(0, 0); }} className="btn-soft min-h-9 px-3 text-sm">Edit</button>
+            <button onClick={() => { setF({ ...BLANK, ...it, abbr: it.abbr || '', lang: it.lang || '', description: it.description || '', copyright: it.copyright || '', apple_product: it.apple_product || '', google_product: it.google_product || '' }); setFile(null); window.scrollTo(0, 0); }} className="btn-soft min-h-9 px-3 text-sm">Edit</button>
           </div>
         ))}
       </section>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------------------------------- devices and updates
+const REPO = 'nyamebabaku-lab/osoree-plus';
+const PLAT = { android: 'Android', ios: 'iPhone', windows: 'Windows', web: 'Web' };
+const vnum = (v) => String(v || '0').split('.').map((x) => parseInt(x, 10) || 0).reduce((a, x) => a * 1000 + x, 0);
+const ago = (t) => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
+
+function DevicesList() {
+  const [q, setQ] = useState('');
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState('all');
+  const list = useLoad(() => admin('devices', { q: search, filter }), [search, filter]);
+  const rel = useLoad(() => admin('releases'), []);
+  const [msg, setMsg] = useState(null);
+  const latest = (p) => (rel.data || []).filter((r) => r.platform === p).reduce((a, r) => (!a || vnum(r.version) > vnum(a) ? r.version : a), '');
+  const act = async (fn, ok) => { setMsg(null); try { await fn(); setMsg({ text: ok }); list.reload(); } catch (e) { setMsg({ text: e.message, bad: true }); } };
+  const counts = (list.data || []).reduce((a, x) => { a[x.platform || 'web'] = (a[x.platform || 'web'] || 0) + 1; return a; }, {});
+  return (
+    <div className="space-y-3">
+      <form onSubmit={(e) => { e.preventDefault(); setSearch(q); }} className="flex gap-2">
+        <input className="field" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search device, model, church, phone, version" aria-label="Search devices" />
+        <button className="btn-soft shrink-0">Search</button>
+      </form>
+      <Seg label="Device filter" value={filter} onChange={setFilter} options={[['all', 'All'], ['active', 'Used in 30 days'], ['pro', 'Pro'], ['blocked', 'Blocked']]} />
+      {list.data && <p className="text-xs text-stone-500">{list.data.length} devices · {Object.entries(counts).map(([k, n]) => `${PLAT[k] || k} ${n}`).join(' · ')}</p>}
+      <Msg m={msg} />
+      {list.error && <p className="text-sm text-red-600">{list.error}</p>}
+      {list.data && !list.data.length && <Empty>No devices.</Empty>}
+      {list.data?.map((x) => {
+        const behind = latest(x.platform) && vnum(x.version) < vnum(latest(x.platform));
+        const feats = Object.entries(x.features || {}).sort((a, b) => b[1] - a[1]);
+        return (
+          <div key={x.code} className={`card space-y-1.5 p-3 text-sm ${x.blocked ? 'ring-2 ring-red-500' : ''}`} aria-label={`Device ${x.code}`}>
+            <div className="flex items-center gap-2">
+              <span className="rounded bg-stone-600 px-1.5 py-0.5 text-[10px] font-bold text-white">{(PLAT[x.platform] || x.platform || 'Web').toUpperCase()}</span>
+              {x.blocked && <span className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">BLOCKED</span>}
+              {x.licence_product && <span className="rounded bg-green-600 px-1.5 py-0.5 text-[10px] font-bold text-white">PRO</span>}
+              <b className="min-w-0 flex-1 truncate">{x.church || x.model || 'Unknown device'}</b>
+              <span className={`text-xs font-semibold ${behind ? 'text-amber-600' : 'text-stone-500'}`}>v{x.version || '?'}{behind ? ' (old)' : ''}</span>
+            </div>
+            <div className="text-xs text-stone-500">{[x.model, x.os, x.country, x.timezone].filter(Boolean).join(' · ')}</div>
+            <div className="text-xs text-stone-500"><span className="font-mono">{x.code}</span> · first {day(x.first_seen)} · last seen {ago(x.last_seen)}</div>
+            {(x.phone || x.linked_phones || x.licence_product) && <div className="text-xs">{x.licence_product ? `${PRODUCT[x.licence_product]}${x.licence_expires ? ` until ${day(x.licence_expires)}` : ''}` : 'No Pro'}{x.phone ? ` · ${x.phone}` : ''}{x.linked_phones && x.linked_phones !== x.phone ? ` · church no. ${x.linked_phones}` : ''}</div>}
+            {feats.length > 0 && <div className="flex flex-wrap gap-1">{feats.map(([k, n]) => <span key={k} className="rounded-full bg-paper-200 px-2 py-0.5 text-[10px] font-semibold dark:bg-night-700">{k} {n}</span>)}</div>}
+            {x.blocked && x.block_reason && <p className="text-xs text-red-600">Reason: {x.block_reason}</p>}
+            <div className="pt-1">
+              {x.blocked
+                ? <button onClick={() => act(() => admin('unblockDevice', { device: x.code }), 'Unblocked. It works again the next time it is online.')} className="btn-soft min-h-9 px-3 text-sm"><Check size={14} /> Unblock</button>
+                : <button onClick={() => { const reason = window.prompt('Block this device? It stops working the next time it goes online. Reason (the church sees it):', ''); if (reason !== null) act(() => admin('blockDevice', { device: x.code, reason }), 'Blocked. It locks the next time it is online.'); }} className="btn-soft min-h-9 px-3 text-sm text-red-600"><Ban size={14} /> Block</button>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ReleasesPanel() {
+  const list = useLoad(() => admin('releases'), []);
+  const [f, setF] = useState({ platform: 'android', version: '', required: false, notes: '', url: '' });
+  const [msg, setMsg] = useState(null);
+  const fileFor = (p) => (p === 'windows' ? 'OsoreePlus-Setup.exe' : 'OsoreePlus.apk');
+  const urlFor = (p, v) => (p === 'ios' ? '' : `https://github.com/${REPO}/releases/download/v${v}/${fileFor(p)}`);
+  const fromGitHub = async () => {
+    setMsg(null);
+    try {
+      const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`).then((x) => x.json());
+      const v = String(r.tag_name || '').replace(/^v/, '');
+      if (!v) throw new Error('No release found on GitHub.');
+      setF({ ...f, version: v, url: urlFor(f.platform, v), notes: f.notes || '' });
+    } catch (e) { setMsg({ text: e.message, bad: true }); }
+  };
+  const publish = async () => {
+    setMsg(null);
+    try { const r = await admin('publishRelease', f); setMsg({ text: `Published. ${r.devices} ${PLAT[f.platform]} devices will see it at their next check (within a day, or at once with "Check for updates").` }); list.reload(); }
+    catch (e) { setMsg({ text: e.message, bad: true }); }
+  };
+  return (
+    <div className="space-y-4">
+      <section className="card space-y-2 p-4">
+        <div className="label">Publish an update</div>
+        <p className="text-xs text-stone-500 dark:text-stone-400">After a new version is built on GitHub, publish it here. Apps check daily; Optional shows "A new version is available", Required blocks use until they update.</p>
+        <Seg label="Release platform" value={f.platform} onChange={(platform) => setF({ ...f, platform, url: f.version ? urlFor(platform, f.version) : '' })} options={[['android', 'Android'], ['windows', 'Windows'], ['ios', 'iPhone']]} />
+        <div className="flex gap-2">
+          <input className="field" value={f.version} onChange={(e) => setF({ ...f, version: e.target.value.trim(), url: urlFor(f.platform, e.target.value.trim()) })} placeholder="Version, e.g. 1.9.0" aria-label="Release version" />
+          <button onClick={fromGitHub} className="btn-soft shrink-0 text-sm">Get latest from GitHub</button>
+        </div>
+        {f.platform !== 'ios' && <input className="field text-xs" value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} placeholder="https:// download link" aria-label="Download link" />}
+        <input className="field" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder="What is new (churches see this)" aria-label="Release notes" />
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.required} onChange={(e) => setF({ ...f, required: e.target.checked })} className="h-4 w-4 accent-red-600" aria-label="Required update" />Required (blocks use until updated)</label>
+        <button onClick={publish} disabled={!f.version} className="btn w-full bg-green-600 text-white"><Rocket size={16} /> Publish update</button>
+        <Msg m={msg} />
+      </section>
+      <section className="space-y-1">
+        <div className="label">Published</div>
+        {list.data && !list.data.length && <Empty>Nothing published yet.</Empty>}
+        {list.data?.map((r) => (
+          <div key={r.id} className="card flex items-center gap-2 p-3 text-sm">
+            <span className="rounded bg-stone-600 px-1.5 py-0.5 text-[10px] font-bold text-white">{PLAT[r.platform].toUpperCase()}</span>
+            <b>{r.version}</b>{r.required && <span className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">REQUIRED</span>}
+            <span className="min-w-0 flex-1 truncate text-xs text-stone-500">{r.notes} · {when(r.created_at)}</span>
+            <button onClick={() => window.confirm('Withdraw this update? Apps stop offering it.') && admin('deleteRelease', { id: r.id }).then(list.reload)} aria-label="Withdraw update" className="icon-btn h-9 w-9 text-red-600"><Trash2 size={16} /></button>
+          </div>
+        ))}
+      </section>
+    </div>
+  );
+}
+
+function DevicesTab() {
+  const [view, setView] = useState('devices');
+  return (
+    <div className="space-y-3">
+      <Seg label="Devices view" value={view} onChange={setView} options={[['devices', 'Devices'], ['updates', 'Updates']]} />
+      {view === 'devices' ? <DevicesList /> : <ReleasesPanel />}
     </div>
   );
 }
@@ -412,6 +535,7 @@ function SettingsTab() {
         <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-semibold">Show in the app</span><Seg label="Online payments" value={f.onlinePay} onChange={(onlinePay) => setF({ ...f, onlinePay })} options={[[true, 'Show'], [false, 'Hide']]} /></div>
         <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-semibold">Provider</span><Seg label="Payment provider" value={f.provider} onChange={(provider) => setF({ ...f, provider })} options={[['paystack', 'Paystack'], ['hubtel', 'Hubtel']]} /></div>
         <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-semibold">Test mode</span><Seg label="Test mode" value={f.testMode} onChange={(testMode) => setF({ ...f, testMode })} options={[[true, 'On (no money)'], [false, 'Off (real money)']]} /></div>
+        <button onClick={async () => { if (!window.confirm('Delete every TEST payment and the licences they gave? Real payments are not touched.')) return; try { const r = await admin('clearTestPayments'); setMsg({ text: `Cleared ${r.payments} test payments and ${r.licences} test licences.` }); } catch (e) { setMsg({ text: e.message, bad: true }); } }} className="btn-soft w-full text-sm text-red-600"><Trash2 size={14} /> Clear test payments</button>
         {!f.testMode && <p className="text-xs text-amber-700 dark:text-amber-400">Real payments need the provider's keys saved on the server ({f.provider === 'paystack' ? 'PAYSTACK_SECRET_KEY' : 'HUBTEL_API_ID, HUBTEL_API_KEY, HUBTEL_POS_SALES_ID'}). If they are missing, buying shows an error.</p>}
       </section>
       <section className="card space-y-3 p-4">
@@ -427,7 +551,7 @@ function SettingsTab() {
 }
 
 // ------------------------------------------------------------------------------------------- shell
-const TABS = [['home', 'Home', Home], ['requests', 'Requests', Inbox], ['store', 'Store', ShoppingBag], ['licences', 'Licences', KeyRound], ['codes', 'Codes', Ticket], ['settings', 'Settings', Settings]];
+const TABS = [['home', 'Home', Home], ['requests', 'Requests', Inbox], ['devices', 'Devices', Smartphone], ['store', 'Store', ShoppingBag], ['licences', 'Licences', KeyRound], ['codes', 'Codes', Ticket], ['settings', 'Settings', Settings]];
 
 export default function AdminApp() {
   const [session, setSession] = useState(undefined);
@@ -465,6 +589,7 @@ export default function AdminApp() {
           <>
             {tab === 'home' && <HomeTab go={setTab} onCount={setWaiting} />}
             {tab === 'requests' && <RequestsTab onChange={countWaiting} />}
+            {tab === 'devices' && <DevicesTab />}
             {tab === 'store' && <StoreTab />}
             {tab === 'licences' && <LicencesTab />}
             {tab === 'codes' && <CodesTab />}
@@ -473,9 +598,9 @@ export default function AdminApp() {
         )}
       </main>
       {claim.ok && (
-        <nav className="grid grid-cols-6 border-t border-paper-200 bg-white pb-[env(safe-area-inset-bottom)] dark:border-night-700 dark:bg-night-900">
+        <nav className="grid grid-cols-7 border-t border-paper-200 bg-white pb-[env(safe-area-inset-bottom)] dark:border-night-700 dark:bg-night-900">
           {TABS.map(([id, label, Icon]) => (
-            <button key={id} onClick={() => setTab(id)} className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-semibold ${tab === id ? 'text-green-600' : 'text-stone-500 dark:text-stone-400'}`}><span className="relative"><Icon size={20} />{id === 'requests' && waiting > 0 && <span className="absolute -right-2.5 -top-1.5 min-w-4 rounded-full bg-red-600 px-1 text-[10px] leading-4 text-white">{waiting}</span>}</span>{label}</button>
+            <button key={id} onClick={() => setTab(id)} className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-[10px] font-semibold ${tab === id ? 'text-green-600' : 'text-stone-500 dark:text-stone-400'}`}><span className="relative"><Icon size={20} />{id === 'requests' && waiting > 0 && <span className="absolute -right-2.5 -top-1.5 min-w-4 rounded-full bg-red-600 px-1 text-[10px] leading-4 text-white">{waiting}</span>}</span>{label}</button>
           ))}
         </nav>
       )}

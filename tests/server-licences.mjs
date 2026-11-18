@@ -222,6 +222,33 @@ const ov3 = await call('admin/overview', {}, boss);
 ok('item sales counted', ov3.momo_revenue >= 120 + 250, JSON.stringify(ov3));
 envs.MNOTIFY_KEY = ''; fakeProvider.fn = null;
 
+// ---- device register, blocking, releases, clearing test payments
+const H = 'OSR-HHHH-JJJJ-KKKK';
+await call('hello', { device: H, platform: 'android', version: '1.8.0', model: 'Samsung SM-A155F', os: 'Android 14', country: 'GH', timezone: 'Africa/Accra', features: { listen: 2, stream: 1 } });
+await call('hello', { device: H, platform: 'android', version: '1.8.0', features: { listen: 3, bogus$: 5 } });
+let dv = (await call('admin/devices', { q: 'samsung' }, boss))[0];
+ok('device register: model, system, area', dv?.model === 'Samsung SM-A155F' && dv.os === 'Android 14' && dv.country === 'GH' && dv.timezone === 'Africa/Accra', JSON.stringify(dv).slice(0, 160));
+ok('feature use adds upd (bad names ignored)', dv.features.listen === 5 && dv.features.stream === 1 && !dv.features['bogus$'], JSON.stringify(dv.features));
+ok('no update yet', (await call('hello', { device: H, platform: 'android', version: '1.8.0' })).update === null);
+ok('release needs a download link', (await call('admin/publishRelease', { platform: 'android', version: '1.9.0' }, boss)).error?.includes('download link'));
+await call('admin/publishRelease', { platform: 'android', version: '1.9.0', url: 'https://example.org/OsoreePlus.apk', notes: 'New: listener' }, boss);
+let upd = (await call('hello', { device: H, platform: 'android', version: '1.8.0' })).update;
+ok('optional update offered', upd?.version === '1.9.0' && upd.required === false && upd.url.endsWith('.apk') && upd.notes === 'New: listener', JSON.stringify(upd));
+ok('not offered to Windows or to newer phones', !(await call('hello', { device: H, platform: 'windows', version: '1.8.0' })).update && !(await call('hello', { device: H, platform: 'android', version: '1.9.0' })).update);
+await call('admin/publishRelease', { platform: 'android', version: '1.9.1', url: 'https://example.org/OsoreePlus.apk', required: true }, boss);
+upd = (await call('hello', { device: H, platform: 'android', version: '1.8.0' })).update;
+ok('required update: newest version, must install', upd.version === '1.9.1' && upd.required === true);
+ok('1.9.0 users also must update to 1.9.1', (await call('hello', { device: H, platform: 'android', version: '1.9.0' })).update?.required === true);
+await call('admin/blockDevice', { device: H, reason: 'Unpaid invoice' }, boss);
+let hb = await call('hello', { device: H, platform: 'android', version: '1.9.1' });
+ok('blocked device told why, no licence', hb.block?.reason === 'Unpaid invoice' && hb.licence === null);
+ok('blocked list', (await call('admin/devices', { filter: 'blocked' }, boss)).every((x) => x.blocked) && (await call('admin/devices', { filter: 'blocked' }, boss)).length === 1);
+await call('admin/unblockDevice', { device: H }, boss);
+ok('unblocked', !(await call('hello', { device: H, platform: 'android', version: '1.9.1' })).block);
+const before = (await d.query("select count(*)::int n from payments where provider <> 'test'"))[0].n;
+const cl = await call('admin/clearTestPayments', {}, boss);
+ok('test payments and their licences cleared, real ones kept', cl.payments >= 1 && (await d.query("select count(*)::int n from payments where provider = 'test'"))[0].n === 0 && (await d.query("select count(*)::int n from payments"))[0].n === before, JSON.stringify(cl));
+
 // ---- the public API keys can read nothing
 await pg.exec("create role anon; grant select on all tables in schema public to anon;");
 await pg.exec('set role anon');

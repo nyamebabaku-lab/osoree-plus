@@ -150,7 +150,50 @@ public class ScreenPlugin extends Plugin implements DisplayManager.DisplayListen
         String id = Settings.Secure.getString(getContext().getContentResolver(), Settings.Secure.ANDROID_ID);
         JSObject r = new JSObject();
         r.put("id", id == null ? "" : id);
+        String maker = android.os.Build.MANUFACTURER == null ? "" : android.os.Build.MANUFACTURER;
+        String model = android.os.Build.MODEL == null ? "" : android.os.Build.MODEL;
+        r.put("model", model.toLowerCase().startsWith(maker.toLowerCase()) ? model : (maker.isEmpty() ? model : Character.toUpperCase(maker.charAt(0)) + maker.substring(1) + " " + model));
+        r.put("os", "Android " + android.os.Build.VERSION.RELEASE);
         call.resolve(r);
+    }
+
+    /** Updates: download the new APK (progress as "update" events), then open Android's Install screen. */
+    @PluginMethod
+    public void installUpdate(PluginCall call) {
+        final String url = call.getString("url", "");
+        if (!url.startsWith("https://")) { call.reject("Bad address."); return; }
+        if (android.os.Build.VERSION.SDK_INT >= 26 && !getContext().getPackageManager().canRequestPackageInstalls()) {
+            Intent allow = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getContext().getPackageName()));
+            allow.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(allow);
+            call.reject("Allow Ɔsɔreɛ Plus to install updates (switch it on), then come back and tap Update again.");
+            return;
+        }
+        io.execute(() -> {
+            File out = new File(getContext().getCacheDir(), "update.apk");
+            try {
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+                c.setInstanceFollowRedirects(true); c.setConnectTimeout(15000); c.setReadTimeout(30000);
+                if (c.getResponseCode() != 200) throw new java.io.IOException("HTTP " + c.getResponseCode());
+                long total = c.getContentLengthLong(), got = 0, lastSent = 0;
+                try (java.io.InputStream in = c.getInputStream(); OutputStream os = new FileOutputStream(out)) {
+                    byte[] buf = new byte[65536]; int n;
+                    while ((n = in.read(buf)) > 0) {
+                        os.write(buf, 0, n); got += n;
+                        if (got - lastSent > 512 * 1024) { lastSent = got; JSObject p = new JSObject(); p.put("received", got); p.put("total", total); notifyListeners("update", p); }
+                    }
+                }
+                Uri apk = androidx.core.content.FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", out);
+                Intent i = new Intent(Intent.ACTION_VIEW);
+                i.setDataAndType(apk, "application/vnd.android.package-archive");
+                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(i);
+                call.resolve();
+            } catch (Exception e) {
+                out.delete();
+                call.reject("The update did not download. Check the internet and try again.", e);
+            }
+        });
     }
 
     // ------------------------------------------------------------------ live streaming (YouTube, Facebook…)
@@ -263,6 +306,107 @@ public class ScreenPlugin extends Plugin implements DisplayManager.DisplayListen
             }
         } catch (Exception ignored) { }
         call.resolve();
+    }
+
+    // ------------------------------------------------------------------ Google Play billing
+    // Used only when the app came from the Play Store (Google's rules); the APK from our website keeps MoMo.
+    private com.android.billingclient.api.BillingClient billing;
+    private PluginCall buyCall;
+
+    @PluginMethod
+    public void playAvailable(PluginCall call) {
+        String installer = null;
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 30) installer = getContext().getPackageManager().getInstallSourceInfo(getContext().getPackageName()).getInstallingPackageName();
+            else installer = getContext().getPackageManager().getInstallerPackageName(getContext().getPackageName());
+        } catch (Exception ignored) { }
+        JSObject r = new JSObject();
+        r.put("play", "com.android.vending".equals(installer));
+        call.resolve(r);
+    }
+
+    private void withBilling(PluginCall call, Runnable then) {
+        if (billing != null && billing.isReady()) { then.run(); return; }
+        billing = com.android.billingclient.api.BillingClient.newBuilder(getContext())
+            .enablePendingPurchases(com.android.billingclient.api.PendingPurchasesParams.newBuilder().enableOneTimeProducts().build())
+            .setListener((result, purchases) -> {
+                PluginCall c = buyCall; buyCall = null;
+                if (c == null) return;
+                if (result.getResponseCode() == com.android.billingclient.api.BillingClient.BillingResponseCode.USER_CANCELED) { c.reject("cancelled"); return; }
+                if (result.getResponseCode() != com.android.billingclient.api.BillingClient.BillingResponseCode.OK || purchases == null || purchases.isEmpty()) { c.reject("The purchase did not finish (" + result.getDebugMessage() + ")."); return; }
+                com.android.billingclient.api.Purchase p = purchases.get(0);
+                if (p.getPurchaseState() == com.android.billingclient.api.Purchase.PurchaseState.PENDING) { c.reject("The payment is pending. Pro switches on once Google confirms it."); return; }
+                c.resolve(purchaseObject(p));
+            }).build();
+        billing.startConnection(new com.android.billingclient.api.BillingClientStateListener() {
+            public void onBillingSetupFinished(com.android.billingclient.api.BillingResult r) {
+                if (r.getResponseCode() == com.android.billingclient.api.BillingClient.BillingResponseCode.OK) then.run(); else call.reject("Google Play is not available: " + r.getDebugMessage());
+            }
+            public void onBillingServiceDisconnected() { billing = null; }
+        });
+    }
+
+    private JSObject purchaseObject(com.android.billingclient.api.Purchase p) {
+        JSObject o = new JSObject();
+        o.put("productId", p.getProducts().isEmpty() ? "" : p.getProducts().get(0));
+        o.put("token", p.getPurchaseToken());
+        o.put("orderId", p.getOrderId());
+        return o;
+    }
+
+    private java.util.List<com.android.billingclient.api.QueryProductDetailsParams.Product> productList(JSArray ids) throws Exception {
+        java.util.List<com.android.billingclient.api.QueryProductDetailsParams.Product> list = new ArrayList<>();
+        for (int i = 0; i < ids.length(); i++) list.add(com.android.billingclient.api.QueryProductDetailsParams.Product.newBuilder().setProductId(ids.getString(i)).setProductType(com.android.billingclient.api.BillingClient.ProductType.INAPP).build());
+        return list;
+    }
+
+    @PluginMethod
+    public void playProducts(PluginCall call) {
+        JSArray ids = call.getArray("ids", new JSArray());
+        withBilling(call, () -> {
+            try {
+                billing.queryProductDetailsAsync(com.android.billingclient.api.QueryProductDetailsParams.newBuilder().setProductList(productList(ids)).build(), (r, details) -> {
+                    JSArray out = new JSArray();
+                    for (com.android.billingclient.api.ProductDetails d : details) {
+                        JSObject o = new JSObject();
+                        o.put("id", d.getProductId()); o.put("title", d.getName());
+                        o.put("price", d.getOneTimePurchaseOfferDetails() != null ? d.getOneTimePurchaseOfferDetails().getFormattedPrice() : "");
+                        out.put(o);
+                    }
+                    JSObject res = new JSObject(); res.put("products", out); call.resolve(res);
+                });
+            } catch (Exception e) { call.reject("Google Play did not answer."); }
+        });
+    }
+
+    @PluginMethod
+    public void playBuy(PluginCall call) {
+        String id = call.getString("id", "");
+        String account = call.getString("account", "");
+        withBilling(call, () -> {
+            try {
+                JSArray one = new JSArray(); one.put(id);
+                billing.queryProductDetailsAsync(com.android.billingclient.api.QueryProductDetailsParams.newBuilder().setProductList(productList(one)).build(), (r, details) -> {
+                    if (details.isEmpty()) { call.reject("This product is not in Google Play yet."); return; }
+                    com.android.billingclient.api.BillingFlowParams.Builder b = com.android.billingclient.api.BillingFlowParams.newBuilder()
+                        .setProductDetailsParamsList(java.util.Collections.singletonList(com.android.billingclient.api.BillingFlowParams.ProductDetailsParams.newBuilder().setProductDetails(details.get(0)).build()));
+                    if (!account.isEmpty()) b.setObfuscatedAccountId(account);
+                    buyCall = call;
+                    main.post(() -> billing.launchBillingFlow(getActivity(), b.build()));
+                });
+            } catch (Exception e) { call.reject("Google Play did not answer."); }
+        });
+    }
+
+    @PluginMethod
+    public void playRestore(PluginCall call) {
+        withBilling(call, () -> billing.queryPurchasesAsync(
+            com.android.billingclient.api.QueryPurchasesParams.newBuilder().setProductType(com.android.billingclient.api.BillingClient.ProductType.INAPP).build(),
+            (r, purchases) -> {
+                JSArray out = new JSArray();
+                for (com.android.billingclient.api.Purchase p : purchases) if (p.getPurchaseState() == com.android.billingclient.api.Purchase.PurchaseState.PURCHASED) out.put(purchaseObject(p));
+                JSObject res = new JSObject(); res.put("purchases", out); call.resolve(res);
+            }));
     }
 
     // ------------------------------------------------------------------ notifications

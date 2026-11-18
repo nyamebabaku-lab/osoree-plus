@@ -60,5 +60,28 @@ const yr = await call('apple', { device: P1, jws: await sign(c, { ...tx, product
 const yl = lic(yr.licence);
 ok('one year counts from the App Store purchase date', Math.abs(yl.e - Math.floor((Date.now() - 100 * 86400000 + 365 * 86400000) / 1000)) < 86400 * 2, JSON.stringify(yl));
 ok('an ended one-year purchase cannot be restored', (await call('apple', { device: P2, jws: await sign(c, { ...tx, productId: 'com.osoree.plus.pro.year', transactionId: '6', originalTransactionId: '6', purchaseDate: Date.now() - 400 * 86400000 }) })).error?.includes('ended'));
+// store items bought through the App Store
+await d.query("insert into store_items (id, kind, title, price, active, file_path, apple_product, google_product) values ('BTWI', 'bible', 'Twi Bible', 120, true, 'bible/x.json.gz', 'com.osoree.plus.bible.twi', 'bible_twi')");
+const it = await call('apple', { device: P1, jws: await sign(c, { ...tx, productId: 'com.osoree.plus.bible.twi', transactionId: '55', originalTransactionId: '55' }) });
+ok('App Store purchase of a store Bible: owned on this iPhone', it.item === 'BTWI' && it.owned.includes('BTWI'), JSON.stringify(it));
+const it2 = await call('apple', { device: P2, jws: await sign(c, { ...tx, productId: 'com.osoree.plus.bible.twi', transactionId: '56', originalTransactionId: '55' }) });
+ok('Restore on another iPhone with the same Apple ID: owned there too', it2.owned.includes('BTWI'));
+ok('one sale recorded for the item', (await d.query("select count(*)::int n from licence_requests where item_id = 'BTWI' and status = 'approved'"))[0].n === 1);
+
+// Google Play
+const plays = { 'tokA-0123456789': { purchaseState: 0, acknowledgementState: 0, orderId: 'GPA.1', purchaseTimeMillis: String(Date.now()) }, 'tokB-0123456789': { purchaseState: 1, orderId: 'GPA.2' }, 'tokC-0123456789': { purchaseState: 0, acknowledgementState: 1, orderId: 'GPA.3', obfuscatedExternalAccountId: 'acct9' } };
+const acks = [];
+d.google = { verify: async (pid, t) => { if (!plays[t]) throw new Error('not found'); return plays[t]; }, acknowledge: async (pid, t) => acks.push(t) };
+const G1 = 'OSR-GGGG-HHHH-JJJJ';
+const g1 = await call('google', { device: G1, productId: 'pro', token: 'tokA-0123456789' });
+ok('Google Play purchase gives Pro', g1.licence && lic(g1.licence).d === G1);
+ok('the purchase is acknowledged (no automatic refund)', acks.includes('tokA-0123456789'));
+ok('cancelled Google purchase refused', (await call('google', { device: G1, productId: 'pro', token: 'tokB-0123456789' })).error?.includes('cancelled'));
+ok('unknown token refused', (await call('google', { device: G1, productId: 'pro', token: 'nope-nope-nope' })).error?.includes('could not confirm'));
+const gi = await call('google', { device: G1, productId: 'bible_twi', token: 'tokC-0123456789' });
+ok('Google Play purchase of a store Bible', gi.owned?.includes('BTWI'));
+d.google = null;
+ok('without the Google key: clear message', (await call('google', { device: G1, productId: 'pro', token: 'tokA-long-token-x' })).error?.includes('not set up'));
+
 console.log(`${pass} passed ${fail} failed`);
 process.exit(fail ? 1 : 0);

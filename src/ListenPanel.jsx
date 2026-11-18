@@ -65,6 +65,7 @@ export default function ListenPanel({ bible }) {
     if (!gate('listen')) return;
     setError('');
     askNotifications();
+    useStore.getState().countUse('listen');
     if (IS_NATIVE) {
       const { granted } = await Screen.requestMicrophone();
       if (!granted) { setError('Allow the microphone to listen for scriptures.'); return; }

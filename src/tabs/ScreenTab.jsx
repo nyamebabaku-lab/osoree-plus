@@ -8,6 +8,7 @@ import { Seg } from '../ui.jsx';
 import { Thumb } from './MediaTab.jsx';
 import { ProLock, ProSection, useGate } from '../Pro.jsx';
 import { StoreButton } from '../StoreSheet.jsx';
+import { UpdateSection } from '../Updates.jsx';
 
 const BGS = ['#000000', '#0b1f3a', '#12301f', '#3a0d12', '#2b1a45', '#ffffff'];
 const FGS = ['#ffffff', '#f4db8c', '#000000'];
@@ -169,6 +170,7 @@ export default function ScreenTab() {
     <div className="space-y-4">
       <ProSection />
       <StoreButton />
+      <UpdateSection />
       {IS_NATIVE ? <PhoneScreens /> : (
         <section className="card space-y-3 p-4">
           <div className="label">Screen</div>

@@ -18,6 +18,7 @@ import LiveTab from './tabs/LiveTab.jsx';
 import CameraMode from './CameraMode.jsx';
 import { PipBar } from './tabs/PipControls.jsx';
 import { Paywall, ProBadge, lockedFeatures, useLicenceBoot } from './Pro.jsx';
+import { BlockScreen, UpdatePrompt } from './Updates.jsx';
 import { startWifiCamera } from './lib/wificam.js';
 
 const TABS = [['bible', 'Bible', BookOpen], ['songs', 'Songs', Music], ['media', 'Media', Image], ['live', 'Live', Radio], ['plan', 'Plan', ListOrdered], ['screen', 'Screen', Monitor]];
@@ -286,13 +287,14 @@ export default function App() {
   useEffect(() => { setExtraBookNames(bible?.bookNames); }, [bible]);
 
   // Keep every screen in step with the operator.
-  const message = bible ? screenState({ ...state, locked: lockedFeatures(state.licStatus), free: state.licStatus?.state === 'free' }, { bible, compare: compareId ? compare : null, songs, media }) : null;
+  const message = state.blocked ? { kind: 'black', style: {} } : bible ? screenState({ ...state, locked: lockedFeatures(state.licStatus), free: state.licStatus?.state === 'free' }, { bible, compare: compareId ? compare : null, songs, media }) : null;
   const json = message ? JSON.stringify(message) : '';
   useEffect(() => { if (json) send(JSON.parse(json)); }, [json]);
 
   const isDark = document.documentElement.classList.contains('dark');
   const versions = [...BUILTIN, ...imported];
 
+  if (state.blocked) return <BlockScreen block={state.blocked} />;
   if (cameraMode) return <CameraMode onExit={() => setCameraMode(false)} />;
 
   return (
@@ -304,6 +306,7 @@ export default function App() {
         </select>
         <button onClick={() => setThemeMode(isDark ? 'light' : 'dark')} aria-label="Switch theme" className="icon-btn">{isDark ? <Sun size={18} /> : <Moon size={18} />}</button>
       </header>
+      <UpdatePrompt />
 
       {!bible ? (
         <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-stone-500">

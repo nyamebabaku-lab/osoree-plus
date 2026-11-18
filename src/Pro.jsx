@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Check, Copy, CreditCard, KeyRound, Lock, Phone, Ticket } from 'lucide-react';
 import { useStore } from './store.js';
+import { getDeviceInfo } from './lib/licence.js';
 import { DEFAULT_POLICY, FEATURES, checkLicence, getDeviceCode, isUnlocked, licenceId, licenceStatus } from './lib/licence.js';
 import { api, openCheckout } from './lib/server.js';
 import { IS_IOS, IS_NATIVE, Screen } from './lib/output.js';
@@ -36,6 +37,8 @@ export async function checkRequest() {
   return r;
 }
 
+export const PLATFORM = IS_IOS ? 'ios' : IS_NATIVE ? 'android' : window.osoreeDesktop ? 'windows' : 'web';
+
 export function useLicenceBoot() {
   const licence = useStore((s) => s.licence);
   const policy = useStore((s) => s.policy);
@@ -48,6 +51,7 @@ export function useLicenceBoot() {
       const now = Math.floor(Date.now() / 1000);
       if (!on) return;
       setLicState({ deviceCode, trialStart: st.trialStart || now, lastSeen: Math.max(st.lastSeen || 0, now) });
+      if (IS_NATIVE && !IS_IOS) Screen.playAvailable().then((r) => setLicState({ play: !!r.play })).catch(() => {});
       recompute(setLicState);
     };
     const sync = async () => {
@@ -55,9 +59,13 @@ export function useLicenceBoot() {
       const st = useStore.getState();
       try {
         const id = st.licence ? licenceId(st.licence) : '';
-        const r = await api('hello', { device: deviceCode, platform: IS_NATIVE ? 'android' : 'web', version: __APP_VERSION__, licenceIds: id ? [id] : [] });
+        const usage = st.usage || {};
+        const r = await api('hello', { device: deviceCode, platform: PLATFORM, version: __APP_VERSION__, licenceIds: id ? [id] : [], ...(await getDeviceInfo()), features: usage });
         if (!on) return;
-        const patch = { policy: r.config, trialStart: Math.min(st.trialStart || r.trialStart, r.trialStart) };
+        // what was counted has been sent; keep anything counted meanwhile
+        const now = useStore.getState().usage || {};
+        const left = Object.fromEntries(Object.entries(now).map(([k, v]) => [k, v - (usage[k] || 0)]).filter(([, v]) => v > 0));
+        const patch = { policy: r.config, trialStart: Math.min(st.trialStart || r.trialStart, r.trialStart), usage: left, blocked: r.block || null, update: r.update || null, lastCheck: Date.now() };
         let lic = st.licence;
         if (id && r.revoked?.includes(id)) lic = ''; // revoked, or moved to another phone
         const mine = lic && checkLicence(lic, deviceCode, Math.floor(Date.now() / 1000)).ok;
@@ -73,6 +81,7 @@ export function useLicenceBoot() {
     const q = setInterval(() => { const g = useStore.getState(); if (g.pendingReq) checkRequest().catch(() => {}); if (g.storePending) syncStore().catch(() => {}); }, 30 * 1000);
     const t = setInterval(() => refresh(), 5 * 60 * 1000);
     const s = setInterval(sync, 6 * 60 * 60 * 1000);
+    window.osoreeCheckNow = sync; // "Check for updates" in Settings
     return () => { on = false; clearInterval(t); clearInterval(s); clearInterval(q); };
   }, [setLicState]);
   useEffect(() => { recompute(setLicState); }, [licence, policy, setLicState]);
@@ -297,6 +306,42 @@ function AppleBuy({ onDone }) {
   );
 }
 
+// Installed from Google Play: Pro through Google Play billing (Google's rules).
+export const PLAY_IDS = { pro: 'pro', year: 'pro_year' };
+function PlayBuy({ onDone }) {
+  const { deviceCode, setLicence } = useStore();
+  const [products, setProducts] = useState(null);
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState(null);
+  useEffect(() => { Screen.playProducts({ ids: Object.values(PLAY_IDS) }).then((r) => setProducts(r.products)).catch((e) => setMsg({ text: e.message, bad: true })); }, []);
+  const claim = async (p) => { const r = await api('google', { device: deviceCode, productId: p.productId, token: p.token }); if (r.licence) setLicence(r.licence); return r; };
+  const buy = async (id) => {
+    setMsg(null); setBusy(id);
+    try { const p = await Screen.playBuy({ id, account: deviceCode.replace(/-/g, '') }); await claim(p); setMsg({ text: 'Thank you! Pro is on.' }); setTimeout(onDone, 1200); }
+    catch (e) { if (!/cancel/i.test(e?.message || '')) setMsg({ text: e.message, bad: true }); } finally { setBusy(''); }
+  };
+  const restore = async () => {
+    setMsg(null); setBusy('restore');
+    try { const { purchases } = await Screen.playRestore(); let got = false; for (const p of purchases) { try { if ((await claim(p)).licence) got = true; } catch { /* ended */ } } setMsg(got ? { text: 'Pro restored.' } : { text: 'No Pro purchase was found for this Google account.', bad: true }); }
+    catch (e) { setMsg({ text: e.message, bad: true }); } finally { setBusy(''); }
+  };
+  const order = [[PLAY_IDS.pro, 'Pro for this device', 'Pay once, no end date'], [PLAY_IDS.year, 'Pro for one year', 'Pay once for 12 months']];
+  return (
+    <div className="space-y-2">
+      {!products && !msg && <p className="text-sm text-stone-500">Opening Google Play…</p>}
+      {products && !products.length && <p className="text-sm text-stone-500">Pro is not available in Google Play yet.</p>}
+      {order.map(([id, title, sub]) => { const p = products?.find((x) => x.id === id); return p && (
+        <button key={id} onClick={() => buy(id)} disabled={!!busy} className="flex w-full items-center gap-3 rounded-xl bg-paper-100 p-3 text-left ring-1 ring-green-600/40 dark:bg-night-800">
+          <span className="flex-1"><span className="block text-sm font-bold">{title}</span><span className="block text-xs text-stone-500 dark:text-stone-400">{sub}</span></span>
+          <span className="text-base font-extrabold">{busy === id ? '…' : p.price}</span>
+        </button>
+      ); })}
+      <button onClick={restore} disabled={!!busy} className="btn-soft w-full text-sm">{busy === 'restore' ? 'Restoring…' : 'Restore purchases'}</button>
+      {msg && <p role={msg.bad ? 'alert' : 'status'} className={`text-sm ${msg.bad ? 'text-red-600 dark:text-red-400' : 'text-green-700 dark:text-green-400'}`}>{msg.text}</p>}
+    </div>
+  );
+}
+
 function CodeSection() {
   const { deviceCode, setLicence } = useStore();
   const [code, setCode] = useState('');
@@ -345,7 +390,7 @@ function RestoreSection() {
 
 // Shown when a locked feature is tapped (or the badge): what Pro includes and how to get it.
 export function Paywall() {
-  const { paywall, openPaywall, licStatus } = useStore();
+  const { paywall, openPaywall, licStatus, play } = useStore();
   if (!paywall) return null;
   const close = () => openPaywall('');
   const done = licStatus?.state === 'pro';
@@ -361,8 +406,8 @@ export function Paywall() {
         </div>
         {!done && (
           <>
-            {IS_IOS ? (
-              <div className="space-y-2"><div className="label">Buy Pro</div><AppleBuy onDone={close} /></div>
+            {IS_IOS || play ? (
+              <div className="space-y-2"><div className="label">Buy Pro</div>{IS_IOS ? <AppleBuy onDone={close} /> : <PlayBuy onDone={close} />}</div>
             ) : (
               <>
                 <div className="space-y-2"><div className="label">Buy Pro</div><BuySection /></div>
@@ -370,7 +415,7 @@ export function Paywall() {
               </>
             )}
             <div className="space-y-2"><div className="label">Restore Pro</div><RestoreSection /></div>
-            {!IS_IOS && <details className="rounded-xl bg-paper-100 p-3 dark:bg-night-800">
+            {!IS_IOS && !play && <details className="rounded-xl bg-paper-100 p-3 dark:bg-night-800">
               <summary className="cursor-pointer text-sm font-semibold">Got a licence code from your dealer?</summary>
               <div className="mt-3 space-y-2">
                 <div className="label">This device’s code</div>

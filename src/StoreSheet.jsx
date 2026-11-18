@@ -5,7 +5,7 @@ import { api } from './lib/server.js';
 import { install, installedIds, loadStore, syncStore } from './lib/store-client.js';
 import { Empty, Seg, Sheet } from './ui.jsx';
 import { askNotifications } from './lib/notify.js';
-import { IS_IOS } from './lib/output.js';
+import { IS_IOS, Screen } from './lib/output.js';
 
 const money = (cur, n) => `${cur === 'GHS' ? 'GH₵' : (cur || '') + ' '}${Number(n).toLocaleString()}`;
 const mb = (n) => (n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB');
@@ -89,8 +89,32 @@ export default function StoreSheet({ onClose }) {
     try { await install(it); setNote({ text: it.kind === 'bible' ? `${it.abbr || it.title} is ready: choose it in the Bible version list.` : `${it.title} is in Media and in Screen → Text background.` }); await loadStore().then(setData); }
     catch (e) { setNote({ text: e.message, bad: true }); } finally { setWorking(''); }
   };
-  // iPhone (App Store rules): free items and what the church already owns; paid items are bought on other devices.
-  const items = data?.items.filter((i) => i.kind === kind && (!IS_IOS || i.price === 0 || data.owned.includes(i.id))) || [];
+  // iPhone (App Store rules): free items, what the church owns, and items sold through the App Store.
+  const STORE = IS_IOS ? 'apple' : st.play ? 'google' : '';
+  const pid = (i) => (STORE === 'apple' ? i.apple_product : i.google_product);
+  const items = data?.items.filter((i) => i.kind === kind && (!STORE || i.price === 0 || data.owned.includes(i.id) || pid(i))) || [];
+  const [prices, setPrices] = useState({});
+  useEffect(() => {
+    const ids = (data?.items || []).filter((i) => pid(i) && !data.owned.includes(i.id)).map(pid);
+    if (STORE && ids.length) (STORE === 'apple' ? Screen.iapProducts({ ids }) : Screen.playProducts({ ids })).then((r) => setPrices(Object.fromEntries(r.products.map((p) => [p.id, p.price])))).catch(() => {});
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+  const appleBuy = async (it) => {
+    setNote(null); setWorking(it.id);
+    try {
+      if (STORE === 'apple') { const { jws } = await Screen.iapBuy({ id: it.apple_product }); await api('apple', { device: st.deviceCode, jws }); }
+      else { const p = await Screen.playBuy({ id: it.google_product, account: st.deviceCode.replace(/-/g, '') }); await api('google', { device: st.deviceCode, productId: p.productId, token: p.token }); }
+      await install(it); setNote({ text: `${it.title} is yours.` }); await loadStore().then(setData); }
+    catch (e) { if (!/cancel/i.test(e?.message || '')) setNote({ text: e.message, bad: true }); } finally { setWorking(''); }
+  };
+  const appleRestore = async () => {
+    setNote(null); setWorking('restore');
+    try {
+      if (STORE === 'apple') { const { transactions } = await Screen.iapRestore(); for (const jws of transactions) await api('apple', { device: st.deviceCode, jws }).catch(() => {}); }
+      else { const { purchases } = await Screen.playRestore(); for (const p of purchases) await api('google', { device: st.deviceCode, productId: p.productId, token: p.token }).catch(() => {}); }
+      await refresh(); setNote({ text: 'Purchases restored.' });
+    }
+    catch (e) { setNote({ text: e.message, bad: true }); } finally { setWorking(''); }
+  };
   return (
     <Sheet title="Store" onClose={onClose}>
       <div className="space-y-3">
@@ -119,6 +143,7 @@ export default function StoreSheet({ onClose }) {
                 {installed ? <div className="flex items-center gap-1 text-sm font-semibold text-green-700 dark:text-green-400"><Check size={16} /> Installed</div>
                   : owned ? <button onClick={() => get(it)} disabled={working === it.id} className="btn-gold w-full text-sm"><Download size={16} /> {working === it.id ? 'Downloading…' : `Get${it.file_size ? ` (${mb(it.file_size)})` : ''}`}</button>
                   : waiting ? <div className="flex items-center gap-1 text-sm font-semibold text-amber-700 dark:text-amber-400"><Clock size={16} /> Waiting for confirmation…</div>
+                  : STORE ? (prices[pid(it)] ? <button onClick={() => appleBuy(it)} disabled={working === it.id} className="btn w-full bg-green-600 text-sm text-white">{working === it.id ? 'Buying…' : `Buy ${prices[pid(it)]}`}</button> : <p className="text-xs text-stone-500">Not available here yet.</p>)
                   : buying === it.id ? <BuyForm item={it} onSent={() => { setBuying(''); refresh(); }} />
                   : (
                     <>
@@ -130,6 +155,7 @@ export default function StoreSheet({ onClose }) {
             );
           })}
         </div>
+        {data && STORE && <button onClick={appleRestore} disabled={working === 'restore'} className="btn-soft w-full text-sm">{working === 'restore' ? 'Restoring…' : 'Restore purchases'}</button>}
         {data && <LinkPhone onDone={refresh} />}
       </div>
     </Sheet>

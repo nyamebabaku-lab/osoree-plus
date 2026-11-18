@@ -53,16 +53,42 @@ async function activeLicence(d, device) {
 // ------------------------------------------------------------------------------------------------- app
 
 /** The app says hello when it has internet: the server remembers when this device first appeared (the trial). */
-async function hello(d, { device, platform, version, licenceIds = [] }) {
+const clip = (x, n) => (x == null ? null : String(x).slice(0, n));
+const vnum = (v) => String(v || '0').split('.').map((x) => parseInt(x, 10) || 0).reduce((a, x) => a * 1000 + x, 0);
+/** The newest release for this platform, if it is newer than what the device runs. */
+async function updateFor(d, platform, version) {
+  const p = platform === 'web' ? null : platform;
+  if (!p) return null;
+  const rows = await d.query('select version, required, notes, url, created_at from releases where platform = $1 order by created_at desc limit 20', [p]);
+  const newer = rows.filter((r) => vnum(r.version) > vnum(version));
+  if (!newer.length) return null;
+  const latest = newer.reduce((a, r) => (vnum(r.version) > vnum(a.version) ? r : a));
+  return { version: latest.version, required: newer.some((r) => r.required), notes: latest.notes || '', url: latest.url || '' };
+}
+
+async function hello(d, { device, platform, version, licenceIds = [], model, os, country, timezone, features }) {
   need(DEVICE.test(device || ''), 'Bad device code.');
-  const rows = await d.query(`insert into devices (code, platform, version) values ($1, $2, $3)
-    on conflict (code) do update set last_seen = now(), platform = excluded.platform, version = excluded.version returning first_seen`, [device, platform || null, version || null]);
+  const rows = await d.query(`insert into devices (code, platform, version, model, os, country, timezone) values ($1, $2, $3, $4, $5, $6, $7)
+    on conflict (code) do update set last_seen = now(), platform = excluded.platform, version = excluded.version,
+      model = coalesce(excluded.model, devices.model), os = coalesce(excluded.os, devices.os),
+      country = coalesce(excluded.country, devices.country), timezone = coalesce(excluded.timezone, devices.timezone)
+    returning first_seen, blocked, block_reason`,
+    [device, clip(platform, 20), clip(version, 20), clip(model, 80), clip(os, 60), clip(country, 8), clip(timezone, 60)]);
+  // Feature use since the last check-in: { listen: 2, stream: 1 } is added to the device's totals.
+  if (features && typeof features === 'object') {
+    const clean = Object.fromEntries(Object.entries(features).filter(([k, v]) => /^[a-z]{2,20}$/.test(k) && Number.isInteger(v) && v > 0 && v < 10000).slice(0, 20));
+    if (Object.keys(clean).length) {
+      await d.query(`update devices set features = (select coalesce(jsonb_object_agg(k, to_jsonb(coalesce((features->>k)::int, 0) + coalesce((($2::text)::jsonb->>k)::int, 0))), '{}'::jsonb)
+        from (select jsonb_object_keys(features) k union select jsonb_object_keys(($2::text)::jsonb)) keys) where code = $1`, [device, JSON.stringify(clean)]);
+    }
+  }
   const s = await settings(d);
-  const l = await activeLicence(d, device);
+  const block = rows[0].blocked ? { reason: rows[0].block_reason || '', help: s.dealer || '' } : null;
+  const l = block ? null : await activeLicence(d, device);
   // Licences on this phone that were revoked or moved elsewhere are no longer valid.
   const ids = (Array.isArray(licenceIds) ? licenceIds : []).filter((x) => typeof x === 'string').slice(0, 10);
   const dead = ids.length ? (await d.query("select id from licences where id = any($1) and status <> 'active'", [ids])).map((r) => r.id) : [];
-  return { trialStart: Math.floor(new Date(rows[0].first_seen) / 1000), licence: l?.token || null, revoked: dead, config: publicConfig(s) };
+  return { trialStart: Math.floor(new Date(rows[0].first_seen) / 1000), licence: l?.token || null, revoked: dead, config: publicConfig(s), block, update: await updateFor(d, platform, version) };
 }
 
 /** Starts a payment and returns where to pay (Paystack or Hubtel checkout page; a test page in test mode). */
@@ -301,6 +327,10 @@ const ADMIN = {
     return next;
   },
   async overview(d) {
+    // Keeping only what the privacy policy promises: SMS log 12 months, used-up codes, devices gone for 2 years.
+    await d.query("delete from sms_log where created_at < now() - interval '12 months'");
+    await d.query('delete from restore_codes where expires_at < now()');
+    await d.query("delete from devices where last_seen < now() - interval '2 years' and not exists (select 1 from licences l where l.device_code = devices.code and l.status = 'active')");
     const [x] = await d.query(`select
       (select count(*)::int from devices) devices,
       (select count(*)::int from devices where last_seen > now() - interval '30 days') active30,
@@ -319,7 +349,40 @@ const ADMIN = {
     return q ? d.query("select * from licences where device_code ilike $1 or phone ilike $1 or church ilike $1 or id = $2 order by created_at desc limit 200", [`%${q}%`, q])
       : d.query('select * from licences order by created_at desc limit 200');
   },
-  async devices(d) { return d.query('select * from devices order by last_seen desc limit 300'); },
+  async devices(d, b) {
+    const q = String(b?.q || '').trim();
+    const filter = b?.filter === 'blocked' ? 'and dv.blocked' : b?.filter === 'pro' ? 'and l.id is not null' : b?.filter === 'active' ? "and dv.last_seen > now() - interval '30 days'" : '';
+    return d.query(`select dv.*, l.product licence_product, l.expires_at licence_expires, l.church, l.phone,
+        (select string_agg(distinct p.phone, ', ') from device_phones p where p.device_code = dv.code) linked_phones
+      from devices dv left join lateral (select * from licences x where x.device_code = dv.code and x.status = 'active' and (x.expires_at is null or x.expires_at > now()) order by x.created_at desc limit 1) l on true
+      where ($1 = '' or dv.code ilike $2 or dv.model ilike $2 or l.church ilike $2 or l.phone ilike $2 or dv.version = $1) ${filter}
+      order by dv.last_seen desc limit 300`, [q, `%${q}%`]);
+  },
+  async blockDevice(d, b) {
+    need(DEVICE.test(b.device || ''), 'Bad device code.');
+    const r = await d.query('update devices set blocked = true, block_reason = $2, blocked_at = now() where code = $1 returning code', [b.device, clip(b.reason || '', 200)]);
+    need(r.length, 'Device not found.', 404);
+    return { ok: true };
+  },
+  async unblockDevice(d, b) { await d.query('update devices set blocked = false, block_reason = null, blocked_at = null where code = $1', [b.device]); return { ok: true }; },
+  async releases(d) { return d.query('select * from releases order by created_at desc limit 50'); },
+  async publishRelease(d, b) {
+    need(['android', 'windows', 'ios'].includes(b.platform), 'Platform: android, windows or ios.');
+    need(/^\d+\.\d+\.\d+$/.test(b.version || ''), 'Version like 1.9.0.');
+    need(b.platform === 'ios' || /^https:\/\//.test(b.url || ''), 'Give the https:// download link.');
+    await d.query('insert into releases (platform, version, required, notes, url) values ($1,$2,$3,$4,$5)', [b.platform, b.version, !!b.required, clip(b.notes || '', 500), b.platform === 'ios' ? null : b.url]);
+    const [{ n }] = await d.query('select count(*)::int n from devices where platform = $1 and last_seen > now() - interval \'60 days\'', [b.platform === 'ios' ? 'ios' : b.platform]);
+    return { ok: true, devices: n };
+  },
+  async deleteRelease(d, b) { await d.query('delete from releases where id = $1', [b.id]); return { ok: true }; },
+  /** Removes everything made in test mode: the pretend payments and the licences they gave. */
+  async clearTestPayments(d) {
+    const pays = await d.query("select id from payments where provider = 'test'");
+    const ids = pays.map((p) => p.id);
+    const lic = ids.length ? await d.query("delete from licences where source = 'payment' and source_ref = any($1) returning id", [ids]) : [];
+    await d.query("delete from payments where provider = 'test'");
+    return { payments: ids.length, licences: lic.length };
+  },
   async issue(d, b) {
     need(DEVICE.test(b.device || ''), 'Bad device code.');
     const lic = await issue(d, { device: b.device, product: b.product || 'pro', church: b.church, phone: phoneOf(b.phone) || null, source: 'admin', sourceRef: b.note || null });
@@ -374,10 +437,11 @@ const ADMIN = {
     const id = b.id || (b.kind === 'bible' ? 'B' : 'G') + d.random(9);
     const f = { title: String(b.title).trim().slice(0, 80), abbr: b.abbr ? String(b.abbr).trim().slice(0, 16) : null, lang: b.lang ? String(b.lang).slice(0, 40) : null,
       description: b.description ? String(b.description).slice(0, 300) : null, copyright: b.copyright ? String(b.copyright).slice(0, 300) : null, price: Number(b.price) || 0,
-      thumb: b.thumb && String(b.thumb).startsWith('data:image/') && b.thumb.length < 200000 ? b.thumb : null, active: !!b.active, sort: Number(b.sort) || 0 };
-    await d.query(`insert into store_items (id, kind, title, abbr, lang, description, copyright, price, thumb, active, sort) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-      on conflict (id) do update set title = $3, abbr = $4, lang = $5, description = $6, copyright = $7, price = $8, thumb = coalesce($9, store_items.thumb), active = $10, sort = $11`,
-      [id, b.kind, f.title, f.abbr, f.lang, f.description, f.copyright, f.price, f.thumb, f.active, f.sort]);
+      thumb: b.thumb && String(b.thumb).startsWith('data:image/') && b.thumb.length < 200000 ? b.thumb : null, active: !!b.active, sort: Number(b.sort) || 0,
+      apple: b.apple_product ? String(b.apple_product).trim().slice(0, 100) : null, google: b.google_product ? String(b.google_product).trim().slice(0, 100) : null };
+    await d.query(`insert into store_items (id, kind, title, abbr, lang, description, copyright, price, thumb, active, sort, apple_product, google_product) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      on conflict (id) do update set title = $3, abbr = $4, lang = $5, description = $6, copyright = $7, price = $8, thumb = coalesce($9, store_items.thumb), active = $10, sort = $11, apple_product = $12, google_product = $13`,
+      [id, b.kind, f.title, f.abbr, f.lang, f.description, f.copyright, f.price, f.thumb, f.active, f.sort, f.apple, f.google]);
     return { id };
   },
   /** Where the admin app uploads the item's file (a one-time signed address in the private bucket). */
@@ -443,7 +507,7 @@ async function requestStatus(d, { device }) {
 
 // ----------------------------------------------------------------------------------------------- store
 
-const ITEM_COLS = 'id, kind, title, abbr, lang, description, copyright, price, currency, file_type, file_size, thumb, sort';
+const ITEM_COLS = 'id, kind, title, abbr, lang, description, copyright, price, currency, file_type, file_size, thumb, sort, apple_product, google_product';
 /** Items this device may download: free ones, and paid ones approved for any phone number linked to it. */
 async function owned(d, device) {
   const rows = await d.query(`select distinct r.item_id from licence_requests r join device_phones p on p.phone = r.phone
@@ -465,6 +529,17 @@ async function storeDownload(d, { device, itemId }) {
   need(Number(item.price) === 0 || (await owned(d, device)).includes(item.id), 'Buy this item first.', 403);
   return { url: await d.storage.signDownload(item.file_path), item: { id: item.id, kind: item.kind, title: item.title, abbr: item.abbr, file_type: item.file_type, copyright: item.copyright } };
 }
+/** A store item paid through Apple or Google: recorded like an approved request, owned by the buyer's account. */
+async function storePurchase(d, { device, item, buyer, provider, amount, currency }) {
+  const [had] = await d.query("select id from licence_requests where phone = $1 and item_id = $2 and status = 'approved'", [buyer, item.id]);
+  if (!had) {
+    await d.query("insert into licence_requests (id, device_code, product, amount, currency, phone, momo_ref, status, decided_at, item_id, note) values ($1,$2,'item',$3,$4,$5,$6,'approved',now(),$7,$8)",
+      ['R' + d.random(10), device, amount, currency, buyer, buyer.split(':')[1].slice(0, 40), item.id, provider]);
+  }
+  await d.query('insert into device_phones (device_code, phone) values ($1, $2) on conflict do nothing', [device, buyer]);
+  return { item: item.id, owned: await owned(d, device) };
+}
+
 /** Another phone of the same church: confirm the number by SMS code, then it gets the church's purchases. */
 async function storeLink(d, { phone, code, device }) {
   need(DEVICE.test(device || ''), 'Bad device code.');
@@ -492,6 +567,10 @@ async function apple(d, { device, jws }) {
   let t;
   try { t = await d.apple(jws); } catch (e) { throw new Fail(`The App Store purchase could not be checked (${e.message}).`, 400); }
   need(t.bundleId === APPLE_BUNDLE, 'This purchase is for another app.');
+  need(!t.revocationDate, 'Apple refunded this purchase.', 403);
+  // A store item (Bible or background) bought in the App Store: owned by this Apple ID, on every iPhone that restores it.
+  const [item] = APPLE_PRODUCTS[t.productId] ? [] : await d.query('select * from store_items where apple_product = $1', [t.productId]);
+  if (item) return storePurchase(d, { device, item, buyer: 'apple:' + String(t.originalTransactionId || t.transactionId), provider: 'apple', amount: Number(t.price || 0) / 1000, currency: t.currency || 'USD' });
   const product = APPLE_PRODUCTS[t.productId];
   need(product, 'Unknown App Store product.');
   need(!t.revocationDate, 'Apple refunded this purchase.', 403);
@@ -512,6 +591,34 @@ async function apple(d, { device, jws }) {
   return { licence: lic.token };
 }
 
+// ----------------------------------------------------------------------------------------------- Google Play billing
+
+export const GOOGLE_PRODUCTS = { pro: 'pro', pro_year: 'year' };
+/** Play Store installs: Google confirms the purchase token; we acknowledge it and give the licence or the item. */
+async function google(d, { device, productId, token }) {
+  need(DEVICE.test(device || ''), 'Bad device code.');
+  need(d.google, 'Google Play purchases are not set up yet.', 503);
+  need(typeof token === 'string' && token.length > 10 && typeof productId === 'string', 'Bad purchase.');
+  let p;
+  try { p = await d.google.verify(productId, token); } catch (e) { throw new Fail(`Google Play could not confirm the purchase (${e.message}).`, 400); }
+  need(p.purchaseState === 0, p.purchaseState === 2 ? 'The payment is still pending.' : 'This purchase was cancelled or refunded.', 403);
+  if (p.acknowledgementState !== 1) await d.google.acknowledge(productId, token).catch(() => {}); // unacknowledged purchases are refunded after 3 days
+  const ref = 'G' + String(p.orderId || token.slice(0, 40));
+  const [item] = GOOGLE_PRODUCTS[productId] ? [] : await d.query('select * from store_items where google_product = $1', [productId]);
+  if (item) return storePurchase(d, { device, item, buyer: 'google:' + (p.obfuscatedExternalAccountId || ref), provider: 'google', amount: Number(item.price), currency: item.currency || 'GHS' });
+  const product = GOOGLE_PRODUCTS[productId];
+  need(product, 'Unknown Google Play product.');
+  const [paid] = await d.query('select * from payments where id = $1', [ref]);
+  if (!paid) await d.query("insert into payments (id, device_code, product, amount, currency, phone, provider, status, paid_at) values ($1,$2,$3,0,'',$4,'google','paid',now())", [ref, device, product, '']);
+  const [l] = await d.query("select * from licences where source = 'google' and source_ref = $1 and status = 'active' order by created_at desc limit 1", [ref]);
+  if (l && l.device_code === device) return { licence: l.token };
+  if (l) await d.query("update licences set status = 'moved' where id = $1", [l.id]);
+  const until = product === 'year' ? new Date(Number(p.purchaseTimeMillis || d.now().getTime()) + YEAR_MS) : null;
+  need(!until || until > d.now(), 'This one-year purchase has ended. Buy Pro again to continue.', 403);
+  const lic = await issue(d, { device, product, source: 'google', sourceRef: ref, until });
+  return { licence: lic.token };
+}
+
 /** One entry point: route, body, the signed-in user (admin routes) and the raw request bits (webhooks). */
 export async function handle(d, route, body = {}, extra = {}) {
   switch (route) {
@@ -527,6 +634,7 @@ export async function handle(d, route, body = {}, extra = {}) {
     case 'request': return request(d, body);
     case 'request-status': return requestStatus(d, body);
     case 'apple': return apple(d, body);
+    case 'google': return google(d, body);
     case 'store': return store(d, body);
     case 'store-download': return storeDownload(d, body);
     case 'store-link': return storeLink(d, body);

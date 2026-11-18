@@ -178,6 +178,36 @@ await page.locator('nav button', { hasText: 'Home' }).click();
 await page.waitForSelector('.card >> text=Revenue');
 ok('MoMo sales in the revenue', await page.locator('.card', { hasText: 'Revenue' }).first().innerText().then((t) => t.includes('400')));
 
+// Devices, blocking, publishing updates, clearing test payments
+await handle(d, 'hello', { device: 'OSR-MMMM-NNNN-PPPP', platform: 'android', version: '1.8.0', model: 'Tecno Spark 20', os: 'Android 13', country: 'GH', timezone: 'Africa/Accra', features: { listen: 4 } });
+await page.locator('nav button', { hasText: 'Devices' }).click();
+await page.waitForSelector('[aria-label="Device OSR-MMMM-NNNN-PPPP"]');
+const card = page.getByLabel('Device OSR-MMMM-NNNN-PPPP');
+ok('device listed with model, system and area', await card.innerText().then((t) => t.includes('Tecno Spark 20') && t.includes('Android 13') && t.includes('Africa/Accra') && t.includes('listen 4') && t.includes('v1.8.0')));
+page.once('dialog', (dl) => dl.accept('Licence misuse'));
+await card.getByRole('button', { name: 'Block' }).click();
+await page.waitForSelector('text=Blocked. It locks');
+ok('blocked from the dashboard', (await handle(d, 'hello', { device: 'OSR-MMMM-NNNN-PPPP', platform: 'android', version: '1.8.0' })).block?.reason === 'Licence misuse');
+await page.getByLabel('Device OSR-MMMM-NNNN-PPPP').getByRole('button', { name: 'Unblock' }).click();
+await page.waitForSelector('text=Unblocked.');
+ok('unblocked', !(await handle(d, 'hello', { device: 'OSR-MMMM-NNNN-PPPP', platform: 'android', version: '1.8.0' })).block);
+await page.getByLabel('Devices view').getByRole('button', { name: 'Updates' }).click();
+await page.getByLabel('Release version').fill('1.9.0');
+ok('download link filled in from the version', (await page.getByLabel('Download link').inputValue()) === 'https://github.com/nyamebabaku-lab/osoree-plus/releases/download/v1.9.0/OsoreePlus.apk');
+await page.getByLabel('Release notes').fill('Faster Bible search');
+await page.getByRole('button', { name: 'Publish update' }).click();
+await page.waitForSelector('text=/Published\\. 1 Android devices/');
+ok('published: Android devices are offered 1.9.0', (await handle(d, 'hello', { device: 'OSR-MMMM-NNNN-PPPP', platform: 'android', version: '1.8.0' })).update?.version === '1.9.0');
+await page.getByLabel('Devices view').getByRole('button', { name: 'Devices' }).click();
+await page.waitForSelector('[aria-label="Device OSR-MMMM-NNNN-PPPP"]');
+ok('devices on old versions are marked', await page.getByLabel('Device OSR-MMMM-NNNN-PPPP').innerText().then((t) => t.includes('(old)')));
+await d.query("insert into payments (id, device_code, product, amount, currency, phone, provider, status) values ('PTEST1', 'OSR-MMMM-NNNN-PPPP', 'pro', 350, 'GHS', '0240000000', 'test', 'paid')");
+await page.locator('nav button', { hasText: 'Settings' }).click();
+page.once('dialog', (dl) => dl.accept());
+await page.getByRole('button', { name: 'Clear test payments' }).click();
+await page.waitForSelector('text=/Cleared 1 test payments/');
+ok('test payments cleared', (await d.query("select count(*)::int n from payments where provider = 'test'"))[0].n === 0);
+
 // stays signed in; theme switch; sign out
 await page.reload();
 await page.waitForSelector('nav >> text=Licences');

@@ -26,6 +26,20 @@ const ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'; // no 0/1/I/O, easy to read
 
 // "OSR-7K2M-9QXP-4D8A": the same on this phone for as long as the phone is not factory-reset.
 let deviceCodeCache = null;
+let deviceInfoCache = null;
+/** What this device is (for the Super Admin's device list): model, system, country, time zone. */
+export async function getDeviceInfo() {
+  if (deviceInfoCache) return deviceInfoCache;
+  let model = '', os = '';
+  if (IS_NATIVE) { const r = await Screen.getDeviceId().catch(() => ({})); model = r.model || ''; os = r.os || ''; }
+  else if (window.osoreeDesktop?.info) ({ model, os } = window.osoreeDesktop.info);
+  else { const ua = navigator.userAgent; os = (ua.match(/(Windows NT [\d.]+|Android [\d.]+|iPhone OS [\d_]+|Mac OS X [\d_]+|Linux)/) || [''])[0].replace(/_/g, '.'); model = (ua.match(/(Edg|Chrome|Firefox|Safari)\/[\d]+/) || ['Browser'])[0]; }
+  const lang = navigator.language || '';
+  let timezone = '';
+  try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { /* old browser */ }
+  deviceInfoCache = { model, os, country: (lang.split('-')[1] || '').toUpperCase(), timezone };
+  return deviceInfoCache;
+}
 export async function getDeviceCode() {
   if (deviceCodeCache) return deviceCodeCache;
   let raw = '';

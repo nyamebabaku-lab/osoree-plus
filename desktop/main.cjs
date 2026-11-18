@@ -17,6 +17,23 @@ function computerId() {
   return deviceId;
 }
 ipcMain.on('osoree-device-id', (e) => { e.returnValue = computerId(); });
+ipcMain.on('osoree-device-info', (e) => { e.returnValue = { model: `${os.cpus()[0]?.model?.trim() || 'PC'}`.slice(0, 60), os: `Windows ${os.release()}`, version: app.getVersion() }; });
+
+// Updates: download the new setup file and run it silently; it closes this app, installs, and opens it again.
+ipcMain.handle('osoree-install-update', async (e, url) => {
+  if (!/^https:\/\//.test(url || '')) throw new Error('Bad address.');
+  const fs = require('fs');
+  const dest = path.join(app.getPath('temp'), 'OsoreePlus-Update.exe');
+  const res = await fetch(url, { redirect: 'follow' });
+  if (!res.ok) throw new Error('The update did not download. Check the internet and try again.');
+  const total = Number(res.headers.get('content-length') || 0); let got = 0;
+  const out = fs.createWriteStream(dest);
+  for await (const chunk of res.body) { out.write(chunk); got += chunk.length; if (main && !main.isDestroyed()) main.webContents.send('osoree-update-progress', { received: got, total }); }
+  await new Promise((r) => out.end(r));
+  require('child_process').spawn(dest, ['/S', '--force-run'], { detached: true, stdio: 'ignore' }).unref();
+  setTimeout(() => app.quit(), 800);
+  return true;
+});
 
 const page = (name) => path.join(__dirname, 'app', name);
 let main = null, projector = null;
