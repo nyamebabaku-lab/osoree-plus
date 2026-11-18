@@ -28,7 +28,8 @@ export async function settings(d) {
 }
 
 // What the app may know: prices, which features are Pro, trial length, who to call.
-const publicConfig = (s) => ({ trialDays: s.trialDays, pro: s.pro, currency: s.currency, prices: s.prices, provider: s.testMode ? 'test' : s.provider, dealer: s.dealer || '', products: PRODUCTS,
+const support = (s) => ({ help: s.dealer || '', email: s.supportEmail || '', whatsapp: s.supportWhatsapp || '' });
+const publicConfig = (s) => ({ support: support(s), trialDays: s.trialDays, pro: s.pro, currency: s.currency, prices: s.prices, provider: s.testMode ? 'test' : s.provider, dealer: s.dealer || '', products: PRODUCTS,
   onlinePay: s.onlinePay !== false, momo: s.momoNumber ? { number: s.momoNumber, name: s.momoName || '', network: s.momoNetwork || '' } : null });
 
 async function issue(d, { device, product, church, phone, source, sourceRef, until }) {
@@ -72,7 +73,7 @@ async function hello(d, { device, platform, version, licenceIds = [], model, os,
     on conflict (code) do update set last_seen = now(), platform = excluded.platform, version = excluded.version,
       model = coalesce(excluded.model, devices.model), os = coalesce(excluded.os, devices.os),
       country = coalesce(excluded.country, devices.country), timezone = coalesce(excluded.timezone, devices.timezone)
-    returning first_seen, blocked, block_reason`,
+    returning first_seen, blocked, block_reason, block_kind`,
     [device, clip(platform, 20), clip(version, 20), clip(model, 80), clip(os, 60), clip(country, 8), clip(timezone, 60)]);
   // Feature use since the last check-in: { listen: 2, stream: 1 } is added to the device's totals.
   if (features && typeof features === 'object') {
@@ -83,8 +84,12 @@ async function hello(d, { device, platform, version, licenceIds = [], model, os,
     }
   }
   const s = await settings(d);
-  const block = rows[0].blocked ? { reason: rows[0].block_reason || '', help: s.dealer || '' } : null;
-  const l = block ? null : await activeLicence(d, device);
+  let blocked = rows[0].blocked;
+  let l = await activeLicence(d, device);
+  // Blocked because the trial ended, and now the device has Pro: it unblocks by itself.
+  if (blocked && rows[0].block_kind === 'trial' && l) { await d.query('update devices set blocked = false, block_reason = null, block_kind = null, blocked_at = null where code = $1', [device]); blocked = false; }
+  const block = blocked ? { reason: rows[0].block_reason || '', kind: rows[0].block_kind || 'admin', ...support(s) } : null;
+  if (block) l = null;
   // Licences on this phone that were revoked or moved elsewhere are no longer valid.
   const ids = (Array.isArray(licenceIds) ? licenceIds : []).filter((x) => typeof x === 'string').slice(0, 10);
   const dead = ids.length ? (await d.query("select id from licences where id = any($1) and status <> 'active'", [ids])).map((r) => r.id) : [];
@@ -319,6 +324,8 @@ const ADMIN = {
     if (b.movesPerYear != null) { need(Number.isInteger(b.movesPerYear) && b.movesPerYear >= 0 && b.movesPerYear <= 12, 'Moves: 0 to 12 a year.'); next.movesPerYear = b.movesPerYear; }
     if (b.smsSender != null) { need(/^[A-Za-z0-9 ]{3,11}$/.test(b.smsSender), 'SMS sender: 3 to 11 letters or digits.'); next.smsSender = b.smsSender; }
     if (b.dealer != null) next.dealer = String(b.dealer).slice(0, 120);
+    if (b.supportEmail != null) { const e = String(b.supportEmail).trim(); need(!e || /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(e), 'Support e-mail looks wrong.'); next.supportEmail = e; }
+    if (b.supportWhatsapp != null) { const w = String(b.supportWhatsapp).replace(/[^\d+]/g, ''); need(!w || w.replace('+', '').length >= 9, 'WhatsApp number looks wrong.'); next.supportWhatsapp = w; }
     if (b.momoNumber != null) { const n = String(b.momoNumber).trim(); need(!n || phoneOf(n), 'MoMo number: a Ghana phone number, e.g. 024 123 4567.'); next.momoNumber = n ? phoneOf(n) : ''; }
     if (b.momoName != null) next.momoName = String(b.momoName).trim().slice(0, 60);
     if (b.momoNetwork != null) { need(['', 'MTN', 'Telecel', 'AirtelTigo'].includes(b.momoNetwork), 'Network: MTN, Telecel or AirtelTigo.'); next.momoNetwork = b.momoNetwork; }
@@ -339,8 +346,10 @@ const ADMIN = {
       (select coalesce(sum(amount), 0)::float from payments where status = 'paid' and provider <> 'test' and paid_at > date_trunc('month', now())) revenue_month,
       (select count(*)::int from payments where status = 'paid' and provider = 'test') test_sales,
       (select count(*)::int from licence_requests where status = 'pending') pending_requests,
+      (select count(*)::int from devices dv where not dv.blocked and dv.last_seen > now() - interval '60 days' and dv.first_seen < now() - make_interval(days => $1::int)
+         and not exists (select 1 from licences l where l.device_code = dv.code and l.status = 'active' and (l.expires_at is null or l.expires_at > now()))) trials_ended,
       (select coalesce(sum(amount), 0)::float from licence_requests where status = 'approved') momo_revenue,
-      (select coalesce(sum(amount), 0)::float from licence_requests where status = 'approved' and decided_at > date_trunc('month', now())) momo_revenue_month`);
+      (select coalesce(sum(amount), 0)::float from licence_requests where status = 'approved' and decided_at > date_trunc('month', now())) momo_revenue_month`, [Number((await settings(d)).trialDays ?? 30)]);
     return x;
   },
   async payments(d, b) { return d.query('select * from payments order by created_at desc limit $1', [Math.min(500, b.limit || 100)]); },
@@ -351,7 +360,9 @@ const ADMIN = {
   },
   async devices(d, b) {
     const q = String(b?.q || '').trim();
-    const filter = b?.filter === 'blocked' ? 'and dv.blocked' : b?.filter === 'pro' ? 'and l.id is not null' : b?.filter === 'active' ? "and dv.last_seen > now() - interval '30 days'" : '';
+    const s = await settings(d);
+    const filter = b?.filter === 'blocked' ? 'and dv.blocked' : b?.filter === 'pro' ? 'and l.id is not null' : b?.filter === 'active' ? "and dv.last_seen > now() - interval '30 days'"
+      : b?.filter === 'trialover' ? `and l.id is null and not dv.blocked and dv.first_seen < now() - interval '${Math.max(0, Number(s.trialDays ?? 30) | 0)} days'` : '';
     return d.query(`select dv.*, l.product licence_product, l.expires_at licence_expires, l.church, l.phone,
         (select string_agg(distinct p.phone, ', ') from device_phones p where p.device_code = dv.code) linked_phones
       from devices dv left join lateral (select * from licences x where x.device_code = dv.code and x.status = 'active' and (x.expires_at is null or x.expires_at > now()) order by x.created_at desc limit 1) l on true
@@ -360,11 +371,21 @@ const ADMIN = {
   },
   async blockDevice(d, b) {
     need(DEVICE.test(b.device || ''), 'Bad device code.');
-    const r = await d.query('update devices set blocked = true, block_reason = $2, blocked_at = now() where code = $1 returning code', [b.device, clip(b.reason || '', 200)]);
+    const r = await d.query("update devices set blocked = true, block_reason = $2, block_kind = 'admin', blocked_at = now() where code = $1 returning code", [b.device, clip(b.reason || '', 200)]);
     need(r.length, 'Device not found.', 404);
     return { ok: true };
   },
-  async unblockDevice(d, b) { await d.query('update devices set blocked = false, block_reason = null, blocked_at = null where code = $1', [b.device]); return { ok: true }; },
+  async unblockDevice(d, b) { await d.query('update devices set blocked = false, block_reason = null, block_kind = null, blocked_at = null where code = $1', [b.device]); return { ok: true }; },
+  /** Every device whose free trial ended without Pro (seen in the last 60 days): blocked, and told to get Pro. */
+  async blockEndedTrials(d, b) {
+    const s = await settings(d);
+    const reason = clip(b?.reason || 'Your free trial has ended. Get Pro to keep using Ɔsɔreɛ Plus.', 200);
+    const r = await d.query(`update devices dv set blocked = true, block_kind = 'trial', block_reason = $2, blocked_at = now()
+      where not dv.blocked and dv.first_seen < now() - make_interval(days => $1::int) and dv.last_seen > now() - interval '60 days'
+        and not exists (select 1 from licences l where l.device_code = dv.code and l.status = 'active' and (l.expires_at is null or l.expires_at > now()))
+      returning dv.code`, [Number(s.trialDays ?? 30), reason]);
+    return { blocked: r.length };
+  },
   async releases(d) { return d.query('select * from releases order by created_at desc limit 50'); },
   async publishRelease(d, b) {
     need(['android', 'windows', 'ios'].includes(b.platform), 'Platform: android, windows or ios.');

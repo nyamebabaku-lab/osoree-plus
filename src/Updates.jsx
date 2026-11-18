@@ -1,6 +1,8 @@
 // Blocking and updates, both decided by the Super Admin in the admin app and picked up when the app checks in.
 import { useEffect, useState } from 'react';
-import { Download, Lock, RefreshCw, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { Crown, Download, Lock, RefreshCw, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { SupportLinks } from './Support.jsx';
+import { Paywall } from './Pro.jsx';
 import { useStore } from './store.js';
 import { IS_IOS, IS_NATIVE, Screen } from './lib/output.js';
 import { PLATFORM } from './Pro.jsx';
@@ -51,6 +53,16 @@ export function UpdatePrompt() {
     const t = setTimeout(() => inst.go(update), 8000);
     return () => clearTimeout(t);
   }, [update, autoUpdate, autoTried]); // eslint-disable-line react-hooks/exhaustive-deps
+  const whatsNew = useStore((s) => s.whatsNew);
+  if (whatsNew && whatsNew.version === __APP_VERSION__ && whatsNew.notes) {
+    return (
+      <div className="mx-4 mb-2 flex items-start gap-2 rounded-xl bg-green-600/15 p-3 text-sm ring-1 ring-green-600/50" role="status" aria-label="What's new">
+        <Sparkles size={18} className="mt-0.5 shrink-0 text-green-600" />
+        <div className="min-w-0 flex-1"><b>What's new in {whatsNew.version}</b><p className="text-stone-600 dark:text-stone-300">{whatsNew.notes}</p></div>
+        <button onClick={() => setLicState({ whatsNew: null })} aria-label="Close what's new" className="icon-btn h-8 w-8 shrink-0"><X size={16} /></button>
+      </div>
+    );
+  }
   if (!update || PLATFORM === 'web') return null;
   const body = (
     <>
@@ -83,15 +95,33 @@ export function UpdatePrompt() {
   );
 }
 
-/** The Super Admin blocked this device. */
+/** The Super Admin blocked this device: what to do next (update, get Pro, contact for help). */
 export function BlockScreen({ block }) {
+  const update = useStore((s) => s.update);
+  const openPaywall = useStore((s) => s.openPaywall);
+  const pro = useStore((s) => s.licStatus?.state === 'pro');
+  const inst = useInstaller();
+  const trial = block.kind === 'trial';
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center" role="alert" aria-label="Device blocked">
-      <Lock size={48} className="text-red-500" />
-      <h1 className="text-xl font-bold">This device has been blocked</h1>
-      {block.reason && <p className="text-sm">Reason: {block.reason}</p>}
-      <p className="text-sm text-stone-500 dark:text-stone-400">{block.help ? `Contact ${block.help} to have it unblocked.` : 'Contact your Ɔsɔreɛ Plus dealer to have it unblocked.'}</p>
-      <button onClick={() => window.osoreeCheckNow?.()} className="btn-soft"><RefreshCw size={16} /> Check again</button>
+    <div className="flex h-full flex-col items-center justify-center overflow-y-auto p-6" role="alert" aria-label="Device blocked">
+      <div className="w-full max-w-sm space-y-4 text-center">
+        <Lock size={44} className="mx-auto text-red-500" />
+        <h1 className="text-xl font-bold">{trial ? 'Your free trial has ended' : 'This device has been blocked'}</h1>
+        {block.reason && <p className="text-sm">{trial ? block.reason.replace(/^Your free trial has ended\.?\s*/i, '') : `Reason: ${block.reason}`}</p>}
+        {!pro && (
+          <button onClick={() => openPaywall('about')} className="btn w-full bg-green-600 text-white"><Crown size={18} /> Get Ɔsɔreɛ Plus Pro</button>
+        )}
+        {update && PLATFORM !== 'web' && (
+          <div className="space-y-1">
+            <button onClick={() => inst.go(update)} disabled={inst.busy} className="btn-gold w-full"><Download size={18} /> {inst.busy ? `Downloading… ${pct(inst.progress)}` : `Update to version ${update.version}`}</button>
+            {inst.error && <p role="alert" className="text-xs text-red-600 dark:text-red-400">{inst.error}</p>}
+          </div>
+        )}
+        <div className="rounded-2xl bg-paper-100 p-3 text-left dark:bg-night-800"><SupportLinks topic={trial ? 'I want to get Ɔsɔreɛ Plus Pro' : 'My Ɔsɔreɛ Plus device is blocked'} /></div>
+        <button onClick={() => window.osoreeCheckNow?.()} className="btn-soft w-full"><RefreshCw size={16} /> Check again</button>
+        {trial && <p className="text-xs text-stone-500 dark:text-stone-400">After paying, this device unlocks by itself.</p>}
+      </div>
+      <Paywall />
     </div>
   );
 }

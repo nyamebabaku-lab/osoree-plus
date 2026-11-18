@@ -8,13 +8,20 @@ import { IS_IOS, IS_NATIVE, Screen } from './lib/output.js';
 import { Sheet } from './ui.jsx';
 import { syncStore } from './lib/store-client.js';
 import { askNotifications, notify } from './lib/notify.js';
+import { SupportLinks } from './Support.jsx';
 
 const policyOf = (st) => ({ ...DEFAULT_POLICY, ...(st.policy ? { trialDays: st.policy.trialDays ?? DEFAULT_POLICY.trialDays, pro: st.policy.pro || DEFAULT_POLICY.pro } : {}) });
 
 function recompute(set) {
   const st = useStore.getState();
   if (!st.deviceCode) return;
-  set({ licStatus: licenceStatus({ licence: st.licence, trialStart: st.trialStart, lastSeen: st.lastSeen }, st.deviceCode, policyOf(st)) });
+  const licStatus = licenceStatus({ licence: st.licence, trialStart: st.trialStart, lastSeen: st.lastSeen }, st.deviceCode, policyOf(st));
+  set({ licStatus });
+  // The trial has just ended: tell the church once (and how to get Pro).
+  if (licStatus.state === 'free' && !st.trialNotified && st.trialStart) {
+    set({ trialNotified: true });
+    notify('Your Ɔsɔreɛ Plus trial has ended', 'Get Pro to keep live video, streaming, documents and more. Open Ɔsɔreɛ Plus → Get Pro.');
+  }
 }
 
 /** Waits for a payment to go through, then saves the licence. Returns true when paid. */
@@ -71,6 +78,12 @@ export function useLicenceBoot() {
         const mine = lic && checkLicence(lic, deviceCode, Math.floor(Date.now() / 1000)).ok;
         if (!mine && r.licence) lic = r.licence; // e.g. after reinstalling the app
         if (lic !== st.licence) patch.licence = lic;
+        // A new version: tell the church once, with what is new, and keep the notes for after the update.
+        if (r.update && r.update.version !== st.updateNotified) {
+          patch.updateNotified = r.update.version;
+          patch.whatsNew = { version: r.update.version, notes: r.update.notes || '' };
+          notify(`Ɔsɔreɛ Plus ${r.update.version} is available`, (r.update.notes ? r.update.notes + ' — ' : '') + (r.update.required ? 'This update is required. Open the app to update.' : 'Open the app to update.'));
+        }
         setLicState(patch);
         if (st.pendingPay) await checkPayment(st.pendingPay).catch(() => {});
         if (st.pendingReq) await checkRequest().catch(() => {});
@@ -423,7 +436,7 @@ export function Paywall() {
                 <LicenceEntry onDone={close} />
               </div>
             </details>}
-            {useStore.getState().policy?.dealer && <p className="text-xs text-stone-500 dark:text-stone-400">Help: {useStore.getState().policy.dealer}</p>}
+            <SupportLinks topic="I need help getting Ɔsɔreɛ Plus Pro" />
           </>
         )}
       </div>

@@ -28,6 +28,7 @@ const d = {
   random: (n) => Array.from(crypto.randomBytes(n), (x) => ALPHABET[x % 32]).join(''),
   sha256: async (t) => crypto.createHash('sha256').update(t).digest('hex'),
 };
+const settings2 = async () => (await d.query('select data from settings'))[0].data;
 const call = async (route, body, extra) => { try { return await handle(d, route, body, extra); } catch (e) { return { error: e.message, status: e.status }; } };
 const readLic = (t) => { const [, body, sig] = t.split('.'); return { ok: ed.verify(Buffer.from(sig, 'base64url'), new TextEncoder().encode(body), pub), p: JSON.parse(Buffer.from(body, 'base64url')) }; };
 const A = 'OSR-2345-6789-ABCD', B = 'OSR-BCDE-FGHJ-KLMN', C = 'OSR-PQRS-TUVW-XYZ2';
@@ -248,6 +249,27 @@ ok('unblocked', !(await call('hello', { device: H, platform: 'android', version:
 const before = (await d.query("select count(*)::int n from payments where provider <> 'test'"))[0].n;
 const cl = await call('admin/clearTestPayments', {}, boss);
 ok('test payments and their licences cleared, real ones kept', cl.payments >= 1 && (await d.query("select count(*)::int n from payments where provider = 'test'"))[0].n === 0 && (await d.query("select count(*)::int n from payments"))[0].n === before, JSON.stringify(cl));
+
+// ---- trials that ended: reminder, block all, self-unblock when Pro arrives; support contacts
+await call('admin/saveSettings', { trialDays: 30, supportEmail: 'help@brands.example', supportWhatsapp: '+233 50 540 0054' }, boss);
+ok('bad support e-mail refused', (await call('admin/saveSettings', { supportEmail: 'nope' }, boss)).error?.includes('e-mail'));
+ok('support contacts reach the app', JSON.stringify((await call('hello', { device: 'OSR-TTTT-UUUU-VVVV' })).config.support) === JSON.stringify({ help: (await settings2()).dealer || '', email: 'help@brands.example', whatsapp: '+233505400054' }));
+const T1 = 'OSR-TTTT-UUUU-VVVV', T2 = 'OSR-TTTT-UUUU-WWWW', T3 = 'OSR-TTTT-UUUU-XXXX';
+for (const t of [T2, T3]) await call('hello', { device: t, platform: 'android', version: '1.9.0' });
+await d.query("update devices set first_seen = now() - interval '40 days' where code in ($1, $2, $3)", [T1, T2, T3]);
+await call('admin/issue', { device: T3, product: 'pro' }, boss); // T3 bought Pro
+const ovT = await call('admin/overview', {}, boss);
+ok('admin reminded: trials ended without Pro', ovT.trials_ended >= 2, String(ovT.trials_ended));
+ok('"Trial over" list', (await call('admin/devices', { filter: 'trialover' }, boss)).some((x) => x.code === T2) && !(await call('admin/devices', { filter: 'trialover' }, boss)).some((x) => x.code === T3));
+const bt = await call('admin/blockEndedTrials', {}, boss);
+ok('block them all (Pro devices untouched)', bt.blocked >= 2 && !(await call('hello', { device: T3, platform: 'android', version: '1.9.0' })).block, JSON.stringify(bt));
+const hbT = await call('hello', { device: T2, platform: 'android', version: '1.9.0' });
+ok('blocked device told: trial over, get Pro, how to get help', hbT.block?.kind === 'trial' && /Get Pro/.test(hbT.block.reason) && hbT.block.whatsapp === '+233505400054' && hbT.block.email === 'help@brands.example', JSON.stringify(hbT.block));
+await call('admin/issue', { device: T2, product: 'year' }, boss); // T2 pays
+const hbT2 = await call('hello', { device: T2, platform: 'android', version: '1.9.0' });
+ok('Pro arrives: the trial block lifts by itself', !hbT2.block && !!hbT2.licence);
+await call('admin/blockDevice', { device: T3, reason: 'Misuse' }, boss);
+ok('a hand block stays even with Pro', (await call('hello', { device: T3, platform: 'android', version: '1.9.0' })).block?.kind === 'admin');
 
 // ---- the public API keys can read nothing
 await pg.exec("create role anon; grant select on all tables in schema public to anon;");

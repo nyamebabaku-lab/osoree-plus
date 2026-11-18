@@ -84,6 +84,15 @@ function HomeTab({ go, onCount }) {
     <div className="space-y-4">
       {s.data?.testMode && <p className="rounded-xl bg-amber-500/15 p-3 text-sm font-semibold text-amber-800 dark:text-amber-300">Test mode is on: payments are simulated and no money is taken. Switch it off in Settings when your payment keys are saved.</p>}
       {o.error && <p className="text-sm text-red-600">{o.error}</p>}
+      {x?.trials_ended > 0 && (
+        <div className="space-y-2 rounded-xl bg-amber-500/15 p-3 text-sm" aria-label="Trials ended">
+          <p><b>{x.trials_ended} {x.trials_ended === 1 ? 'device has' : 'devices have'} finished the free trial without Pro.</b> Block them and ask them to get Pro? Each one unlocks by itself as soon as it gets Pro.</p>
+          <div className="flex gap-2">
+            <button onClick={async () => { if (!window.confirm(`Block ${x.trials_ended} devices whose trial ended, and ask them to get Pro?`)) return; try { const r = await admin('blockEndedTrials'); window.alert(`${r.blocked} devices blocked. They see "Your free trial has ended" with Get Pro, update and help buttons.`); o.reload(); } catch (e) { window.alert(e.message); } }} className="btn flex-1 bg-amber-600 text-sm text-white">Block them all and ask them to get Pro</button>
+            <button onClick={() => go('devices')} className="btn-soft shrink-0 text-sm">See list</button>
+          </div>
+        </div>
+      )}
       {x?.pending_requests > 0 && <button onClick={() => go('requests')} className="w-full rounded-xl bg-green-600 p-3 text-left text-sm font-bold text-white">{x.pending_requests} Pro {x.pending_requests === 1 ? 'request is' : 'requests are'} waiting for you. Tap to check the MoMo payment and approve.</button>}
       <div className="grid grid-cols-2 gap-2">
         {[['Revenue', x && money(x.revenue + (x.momo_revenue || 0))], ['This month', x && money(x.revenue_month + (x.momo_revenue_month || 0))], ['Active Pro', x?.licences], ['Devices', x?.devices], ['Used in 30 days', x?.active30], ['Test sales', x?.test_sales]].map(([k, v]) => (
@@ -351,7 +360,8 @@ function DevicesList() {
         <input className="field" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search device, model, church, phone, version" aria-label="Search devices" />
         <button className="btn-soft shrink-0">Search</button>
       </form>
-      <Seg label="Device filter" value={filter} onChange={setFilter} options={[['all', 'All'], ['active', 'Used in 30 days'], ['pro', 'Pro'], ['blocked', 'Blocked']]} />
+      <Seg label="Device filter" value={filter} onChange={setFilter} options={[['all', 'All'], ['active', '30 days'], ['pro', 'Pro'], ['trialover', 'Trial over'], ['blocked', 'Blocked']]} />
+      {filter === 'trialover' && list.data?.length > 0 && <button onClick={async () => { if (!window.confirm(`Block all ${list.data.length} and ask them to get Pro?`)) return; const r = await admin('blockEndedTrials'); setMsg({ text: `${r.blocked} devices blocked; each unlocks by itself when it gets Pro.` }); list.reload(); }} className="btn w-full bg-amber-600 text-sm text-white">Block all and ask them to get Pro</button>}
       {list.data && <p className="text-xs text-stone-500">{list.data.length} devices · {Object.entries(counts).map(([k, n]) => `${PLAT[k] || k} ${n}`).join(' · ')}</p>}
       <Msg m={msg} />
       {list.error && <p className="text-sm text-red-600">{list.error}</p>}
@@ -363,7 +373,7 @@ function DevicesList() {
           <div key={x.code} className={`card space-y-1.5 p-3 text-sm ${x.blocked ? 'ring-2 ring-red-500' : ''}`} aria-label={`Device ${x.code}`}>
             <div className="flex items-center gap-2">
               <span className="rounded bg-stone-600 px-1.5 py-0.5 text-[10px] font-bold text-white">{(PLAT[x.platform] || x.platform || 'Web').toUpperCase()}</span>
-              {x.blocked && <span className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">BLOCKED</span>}
+              {x.blocked && <span className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">{x.block_kind === 'trial' ? 'TRIAL OVER · BLOCKED' : 'BLOCKED'}</span>}
               {x.licence_product && <span className="rounded bg-green-600 px-1.5 py-0.5 text-[10px] font-bold text-white">PRO</span>}
               <b className="min-w-0 flex-1 truncate">{x.church || x.model || 'Unknown device'}</b>
               <span className={`text-xs font-semibold ${behind ? 'text-amber-600' : 'text-stone-500'}`}>v{x.version || '?'}{behind ? ' (old)' : ''}</span>
@@ -494,13 +504,13 @@ function SettingsTab() {
   const s = useLoad(() => admin('settings'), []);
   const [f, setF] = useState(null);
   const [msg, setMsg] = useState(null);
-  const withDefaults = (d) => ({ trialDays: 30, pro: [], prices: { pro: 0, year: 0 }, provider: 'paystack', testMode: true, movesPerYear: 2, smsSender: '', dealer: '', momoNumber: '', momoName: '', momoNetwork: '', onlinePay: true, ...d, prices: { pro: 0, year: 0, ...(d?.prices || {}) }, pro: Array.isArray(d?.pro) ? d.pro : [] });
+  const withDefaults = (d) => ({ trialDays: 30, pro: [], prices: { pro: 0, year: 0 }, provider: 'paystack', testMode: true, movesPerYear: 2, smsSender: '', dealer: '', momoNumber: '', momoName: '', momoNetwork: '', onlinePay: true, supportEmail: '', supportWhatsapp: '', ...d, prices: { pro: 0, year: 0, ...(d?.prices || {}) }, pro: Array.isArray(d?.pro) ? d.pro : [] });
   useEffect(() => { if (s.data) setF(withDefaults(s.data)); }, [s.data]);
   if (!f) return s.error ? <p className="text-sm text-red-600">{s.error}</p> : <Empty>Loading…</Empty>;
   const save = async () => {
     setMsg(null);
     try {
-      const next = await admin('saveSettings', { trialDays: Number(f.trialDays), pro: f.pro, prices: { pro: Number(f.prices.pro), year: Number(f.prices.year) }, provider: f.provider, testMode: f.testMode, movesPerYear: Number(f.movesPerYear), smsSender: f.smsSender, dealer: f.dealer, momoNumber: f.momoNumber, momoName: f.momoName, momoNetwork: f.momoNetwork, onlinePay: f.onlinePay });
+      const next = await admin('saveSettings', { trialDays: Number(f.trialDays), pro: f.pro, prices: { pro: Number(f.prices.pro), year: Number(f.prices.year) }, provider: f.provider, testMode: f.testMode, movesPerYear: Number(f.movesPerYear), smsSender: f.smsSender, dealer: f.dealer, momoNumber: f.momoNumber, momoName: f.momoName, momoNetwork: f.momoNetwork, onlinePay: f.onlinePay, supportEmail: f.supportEmail, supportWhatsapp: f.supportWhatsapp });
       setF(withDefaults(next)); setMsg({ text: 'Saved. Phones pick up the changes the next time they go online.' });
     } catch (e) { setMsg({ text: e.message, bad: true }); }
   };
@@ -542,6 +552,8 @@ function SettingsTab() {
         <div className="label">Restoring and help</div>
         <label className="block text-xs font-semibold">Self-service moves per year<input className="field mt-1" type="number" min="0" max="12" value={f.movesPerYear} onChange={(e) => setF({ ...f, movesPerYear: e.target.value })} aria-label="Moves per year" /></label>
         <label className="block text-xs font-semibold">SMS sender ID (registered with mNotify)<input className="field mt-1" value={f.smsSender} onChange={(e) => setF({ ...f, smsSender: e.target.value })} aria-label="SMS sender" /></label>
+        <label className="block text-xs font-semibold">Support e-mail (a "E-mail" button in the app)<input className="field mt-1" type="email" value={f.supportEmail} onChange={(e) => setF({ ...f, supportEmail: e.target.value })} placeholder="e.g. help@yourchurchapp.com" aria-label="Support e-mail" /></label>
+        <label className="block text-xs font-semibold">WhatsApp number (a "WhatsApp" button opens a chat)<input className="field mt-1" inputMode="tel" value={f.supportWhatsapp} onChange={(e) => setF({ ...f, supportWhatsapp: e.target.value })} placeholder="e.g. 050 540 0054" aria-label="WhatsApp number" /></label>
         <label className="block text-xs font-semibold">Help line shown in the app<input className="field mt-1" value={f.dealer} onChange={(e) => setF({ ...f, dealer: e.target.value })} placeholder="e.g. WhatsApp 024 000 0000" aria-label="Help line" /></label>
       </section>
       <button onClick={save} className="btn w-full bg-green-600 text-white">Save settings</button>

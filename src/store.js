@@ -71,6 +71,9 @@ export const useStore = create(persist((set, get) => {
   pendingPay: '', // a payment the app is waiting for (reference)
   pendingReq: '', // a Pro request (paid by MoMo) waiting for the Super Admin
   play: false, // installed from Google Play: Pro and store items are bought with Google Play billing
+  trialNotified: false,
+  updateNotified: '', // newest version the church was told about (phone notification)
+  whatsNew: null, // { version, notes }: shown once after updating to that version // the "trial has ended" notification was shown
   blocked: null, // { reason, help } when the Super Admin blocked this device (kept while offline)
   update: null, // { version, required, notes, url } newest release for this platform
   autoUpdate: false, // download and install new versions by themselves

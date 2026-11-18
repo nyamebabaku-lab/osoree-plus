@@ -208,6 +208,26 @@ await page.getByRole('button', { name: 'Clear test payments' }).click();
 await page.waitForSelector('text=/Cleared 1 test payments/');
 ok('test payments cleared', (await d.query("select count(*)::int n from payments where provider = 'test'"))[0].n === 0);
 
+// trials ended: reminder on Home, block them all; support contacts in Settings
+await handle(d, 'hello', { device: 'OSR-QQQQ-RRRR-SSSS', platform: 'android', version: '1.9.0' });
+await d.query("update devices set first_seen = now() - interval '45 days' where code = 'OSR-QQQQ-RRRR-SSSS'");
+await page.locator('nav button', { hasText: 'Home' }).click();
+await page.waitForSelector('[aria-label="Trials ended"]');
+ok('Home reminds: trials ended without Pro', await page.getByLabel('Trials ended').innerText().then((t) => /finished the free trial without Pro/.test(t)));
+const okAll = (dl) => dl.accept().catch(() => {});
+page.on('dialog', okAll);
+await page.getByRole('button', { name: 'Block them all and ask them to get Pro' }).click();
+await page.waitForTimeout(1200);
+page.off('dialog', okAll);
+ok('blocked with the "get Pro" message', (await handle(d, 'hello', { device: 'OSR-QQQQ-RRRR-SSSS', platform: 'android', version: '1.9.0' })).block?.kind === 'trial');
+await page.locator('nav button', { hasText: 'Settings' }).click();
+await page.getByLabel('Support e-mail').fill('help@brands.example');
+await page.getByLabel('WhatsApp number').fill('050 540 0054');
+await page.getByRole('button', { name: 'Save settings' }).click();
+await page.waitForSelector('text=Saved.');
+const sup = (await handle(d, 'hello', { device: 'OSR-QQQQ-RRRR-SSSS', platform: 'android', version: '1.9.0' })).config.support;
+ok('support e-mail and WhatsApp reach the apps', sup.email === 'help@brands.example' && sup.whatsapp === '0505400054', JSON.stringify(sup));
+
 // stays signed in; theme switch; sign out
 await page.reload();
 await page.waitForSelector('nav >> text=Licences');
