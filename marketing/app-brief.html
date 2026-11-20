@@ -1,0 +1,142 @@
+<title>Ɔsɔreɛ Plus Brief</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one reading column, sections as plain bands; tables for the facts people look up. */
+:root {
+  --bg: #fbfaf7; --fg: #1d1a16; --muted: #5d564c; --line: #e6e1d8; --card: #f3efe7; --gold: #9a6a06; --gold-soft: #f6e7c1;
+  --display: 'Fraunces', Georgia, 'Times New Roman', serif; --text: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111116; --fg: #f2efe9; --muted: #aaa298; --line: #2a2830; --card: #1a1a21; --gold: #e2b232; --gold-soft: #3a2f12; color-scheme: dark } }
+:root[data-theme="dark"] { --bg: #111116; --fg: #f2efe9; --muted: #aaa298; --line: #2a2830; --card: #1a1a21; --gold: #e2b232; --gold-soft: #3a2f12; color-scheme: dark }
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--fg); font: 16px/1.6 var(--text); }
+main { max-width: 820px; margin: 0 auto; padding-block: 40px 72px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2 { font-family: var(--display); text-wrap: balance; line-height: 1.15; margin: 0 }
+h1 { font-size: clamp(2rem, 6vw, 2.8rem) }
+h1 span, h2 span { color: var(--gold) }
+h2 { font-size: 1.45rem; margin-top: 2.6rem; padding-top: 1.2rem; border-top: 1px solid var(--line) }
+h3 { font-size: 1rem; margin: 1.4rem 0 .3rem }
+.eyebrow { text-transform: uppercase; letter-spacing: .14em; font-size: .78rem; font-weight: 700; color: var(--gold); margin: 0 0 .6rem }
+.lead { font-size: 1.15rem; color: var(--muted); max-width: 62ch; margin: .8rem 0 0 }
+p, li { max-width: 68ch }
+.muted { color: var(--muted) }
+ul { padding-left: 1.2em; margin: .4rem 0 } li { margin: .3rem 0 }
+.pitch { background: var(--gold-soft); border-radius: 14px; padding: 18px 20px; margin-top: 1.6rem; font-size: 1.05rem }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin-top: 1rem }
+.grid > div { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; min-width: 0 }
+.grid h3 { margin: 0 0 .3rem }
+.grid p { margin: 0; color: var(--muted); font-size: .95rem }
+.table-wrap { overflow-x: auto; margin-top: .8rem }
+table { width: 100%; border-collapse: collapse; font-size: .95rem; min-width: 520px }
+th, td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid var(--line) }
+th { background: var(--card); font-weight: 600 }
+.pill { display: inline-block; font-size: .75rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); white-space: nowrap }
+.pill.pro { background: var(--gold-soft); border-color: transparent; color: var(--gold) }
+ol.flow { padding-left: 1.3em } ol.flow li { margin: .45rem 0 }
+code { font-size: .9em; background: var(--card); padding: 1px 5px; border-radius: 5px }
+a { color: var(--gold) }
+footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem }
+</style>
+
+<main>
+  <p class="eyebrow">Product brief · version 1.10.1 · November 2026</p>
+  <h1>Ɔsɔreɛ <span>Plus</span></h1>
+  <p class="lead">Church projection software that runs from a phone or a computer. It puts Bible verses, song lyrics, pictures, videos, documents and live camera on the church screen, works offline, and is sold per device by Brands Media, Ghana.</p>
+
+  <div class="pitch"><b>The problem it solves:</b> most Ghanaian churches cannot afford a projection laptop, paid software and a trained operator. With Ɔsɔreɛ Plus, one phone connected to a TV or projector runs the whole service, with no internet needed during the service. When the church wants more, it can stream live, add Wi-Fi screens, and let the app catch scripture references as the preacher speaks.</div>
+
+  <h2>Who it is <span>for</span></h2>
+  <ul>
+    <li><b>Churches of every size</b>, from house fellowships to big congregations, in Ghana first and then abroad.</li>
+    <li><b>The operator</b> (often a young volunteer) who runs the screen from a phone, tablet or laptop.</li>
+    <li><b>Brands Media (Super Admin)</b>, who sells licences, approves payments, runs the store and publishes updates from the admin dashboard.</li>
+  </ul>
+
+  <h2>What it <span>does</span></h2>
+  <div class="grid">
+    <div><h3>Bible <span class="pill">Free</span></h3><p>KJV, ASV, BSB, WEB, YLT and BBE built in. Fast search, shows several verses together, compares two versions side by side, voice search.</p></div>
+    <div><h3>KJV+ Strong's <span class="pill pro">Pro</span></h3><p>KJV with tap-to-read Greek and Hebrew word meanings. Included in the free trial.</p></div>
+    <div><h3>Songs <span class="pill">Free</span></h3><p>Type or paste lyrics; the app splits them into verse and chorus slides automatically.</p></div>
+    <div><h3>Pictures and videos <span class="pill">Free</span></h3><p>Backgrounds, announcements and videos with loop, sound and volume controls.</p></div>
+    <div><h3>Service plan <span class="pill">Free</span></h3><p>Line up the order of service ahead of time and step through it with Next and Previous.</p></div>
+    <div><h3>Documents <span class="pill pro">Pro</span></h3><p>PDF, PowerPoint, Word and Excel files turned into slides on the device.</p></div>
+    <div><h3>Live video <span class="pill pro">Pro</span></h3><p>Camera on screen with lower thirds, name tags, scrolling ticker and picture-in-picture.</p></div>
+    <div><h3>Live streaming <span class="pill pro">Pro</span></h3><p>Stream to YouTube, Facebook, TikTok and others. Stream keys stay on the device.</p></div>
+    <div><h3>Wi-Fi screens <span class="pill pro">Pro</span></h3><p>Extra screens and a second phone used as a Wi-Fi camera, all over the church Wi-Fi.</p></div>
+    <div><h3>Scripture listener <span class="pill pro">Pro</span></h3><p>Listens to the preacher, spots references such as "John 3:16" and shows a card with the verse. The phone buzzes and the operator taps Show; nothing goes on screen without the operator.</p></div>
+    <div><h3>Logo watermark <span class="pill pro">Pro</span></h3><p>The church's own logo on the screen and stream.</p></div>
+    <div><h3>Backup and restore <span class="pill pro">Pro</span></h3><p>Save songs, plans and settings and move them to another device.</p></div>
+  </div>
+
+  <h3>How it reaches the screen</h3>
+  <ul>
+    <li><b>Android:</b> HDMI cable or adapter, or screen casting, to a TV or projector. The phone shows the controls; the screen shows only the output.</li>
+    <li><b>Windows:</b> the output opens full-screen on the second monitor or projector.</li>
+    <li><b>Wi-Fi screens:</b> any TV browser or device on the same Wi-Fi can show the output (Pro).</li>
+  </ul>
+
+  <h2>Platforms and <span>downloads</span></h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>App</th><th>Platform</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>Ɔsɔreɛ Plus</td><td>Android (APK; Play Store bundle ready)</td><td>Live, 1.10.1</td></tr>
+      <tr><td>Ɔsɔreɛ Plus</td><td>Windows (Setup.exe)</td><td>Live, 1.10.1</td></tr>
+      <tr><td>Ɔsɔreɛ Plus</td><td>Web browser</td><td>Live</td></tr>
+      <tr><td>Ɔsɔreɛ Plus</td><td>iPhone and iPad</td><td>Built and tested in the simulator; waiting for the Apple Developer account</td></tr>
+      <tr><td>Ɔsɔreɛ Admin</td><td>Android app and web dashboard</td><td>Live, for the Super Admin only</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>How churches <span>pay</span></h2>
+  <ol class="flow">
+    <li><b>Free trial.</b> Every new device gets every Pro feature for the trial period (currently 15 days, set by the admin).</li>
+    <li><b>After the trial.</b> The free features keep working, but a "Free version" mark appears on the screen and everywhere else. The admin can also block expired trials completely. A blocked device shows Get Pro, Update and contact buttons (e-mail and WhatsApp), and it unlocks by itself once Pro is active.</li>
+    <li><b>Buying Pro.</b> Either "Pro for this device" (no end date) or "Pro for one year". In Ghana: Mobile Money or card, in cedis. Outside Ghana: card only, in US dollars. The country is detected from the internet connection and the SIM card. Churches can also pay by MoMo directly and send a request with the transaction ID for the admin to approve.</li>
+    <li><b>App stores.</b> On iPhone, purchases go through Apple in-app purchase; in the Google Play version, through Google Play billing. Both are checked against Apple's and Google's signatures.</li>
+    <li><b>Licences.</b> Each licence is digitally signed and tied to one device code (for example <code>OSR-7K2M-9QXP-4D8A</code>). Pro can be moved to a new phone with an SMS code.</li>
+  </ol>
+  <p class="muted">Prices are set in the admin dashboard and can change at any time. No refunds once a licence or item is activated, except for payment errors.</p>
+
+  <h2>The <span>store</span></h2>
+  <p>The admin uploads extra Bible translations (only those Brands Media is licensed to sell) and picture or short-video backgrounds, free or paid. A purchase belongs to the church's phone number, so every device the church links gets the item, and it installs automatically. Each item can have a Ghana price, a US dollar price and App Store / Play product IDs.</p>
+
+  <h2>The admin <span>dashboard</span></h2>
+  <div class="grid">
+    <div><h3>Home</h3><p>Revenue in cedis and dollars, active devices, and a reminder to block devices whose trial has ended.</p></div>
+    <div><h3>Requests</h3><p>Approve or decline MoMo Pro and store requests; approval reaches the device straight away.</p></div>
+    <div><h3>Devices</h3><p>Every install with model, system, country, version and feature use. Block, unblock and filter.</p></div>
+    <div><h3>Updates</h3><p>Publish a new version as optional or required with a "What's new" note. Apps show "A new version is available" and can update automatically.</p></div>
+    <div><h3>Licences and codes</h3><p>Issue, revoke and move licences; create prepaid codes for dealers.</p></div>
+    <div><h3>Settings</h3><p>Trial length, Pro features, Ghana and US dollar prices, MoMo details, support contacts, test mode.</p></div>
+  </div>
+
+  <h2>Privacy, rights and <span>trust</span></h2>
+  <ul>
+    <li>Bibles, songs, media, documents and everything projected stay on the device. The server receives only the device code, app and device details, country, feature counts and purchase records.</li>
+    <li>No adverts, no selling of data, no GPS. The scripture listener uses the phone's own speech engine; Brands Media never receives audio or text.</li>
+    <li>Built-in Bibles are public domain or openly licensed. Churches are responsible for song copyright (for example a CCLI licence).</li>
+    <li>Published <a href="https://nyamebabaku-lab.github.io/osoree-plus/privacy.html">Privacy Policy</a>, <a href="https://nyamebabaku-lab.github.io/osoree-plus/terms.html">Terms and Conditions</a> and <a href="https://nyamebabaku-lab.github.io/osoree-plus/licenses.html">copyright notices</a>, written to Ghana's Data Protection Act, 2012 (Act 843).</li>
+  </ul>
+
+  <h2>How it is <span>built</span></h2>
+  <ul>
+    <li>One shared code base (React) packaged for Android and iPhone (Capacitor) and Windows (Electron), plus the web.</li>
+    <li>Server on Supabase: database, file storage and one server function for licences, payments, the store, devices and updates.</li>
+    <li>Payments: Paystack or Hubtel, Apple in-app purchase and Google Play billing. SMS: mNotify. Country lookup: ipinfo.io.</li>
+    <li>420 automated checks cover the app, licences, payments, the store, the listener, updates and the admin dashboard; all pass on 1.10.1.</li>
+  </ul>
+
+  <h2>Still to <span>do</span></h2>
+  <ul>
+    <li>Apple Developer enrolment, then the App Store listing and the two in-app products.</li>
+    <li>Google Play Console listing and the Play products <code>pro</code> and <code>pro_year</code>.</li>
+    <li>Set the US dollar prices and support e-mail/WhatsApp in admin Settings.</li>
+    <li>Add the live Paystack/Hubtel keys and switch test mode off.</li>
+    <li>Register with Ghana's Data Protection Commission.</li>
+  </ul>
+
+  <footer>Ɔsɔreɛ Plus © 2026 Brands Media, Ghana.</footer>
+</main>
