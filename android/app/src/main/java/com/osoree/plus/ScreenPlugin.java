@@ -75,6 +75,12 @@ public class ScreenPlugin extends Plugin implements DisplayManager.DisplayListen
         mediaDir.mkdirs();
         try {
             server = new ScreenServer(getContext().getAssets(), mediaDir, state);
+            server.setControlListener((cmd, ref) -> {
+                JSObject p = new JSObject();
+                p.put("cmd", cmd);
+                p.put("ref", ref);
+                notifyListeners("control", p);
+            });
         } catch (Exception e) {
             server = null; // the projector falls back to the bundled page; Wi-Fi screens are unavailable
         }

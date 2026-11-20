@@ -70,6 +70,11 @@ public class ScreenServer {
     }
 
     public int port() { return socket.getLocalPort(); }
+
+    /** Remote control (e.g. from the Stream Plus switcher): /control?cmd=next|prev|clear|black|show|verse&ref=jn+3+16 */
+    public interface ControlListener { void onControl(String cmd, String ref); }
+    private volatile ControlListener control;
+    public void setControlListener(ControlListener l) { control = l; }
     public boolean lanEnabled() { return lan; }
 
     /** Screens on other devices (the phone's own projector screen is not counted). */
@@ -164,6 +169,19 @@ public class ScreenServer {
                 return;
             }
 
+            if (path.equals("/control")) {
+                String cmd = param(query, "cmd");
+                boolean ok = control != null && cmd.matches("next|prev|clear|black|show|verse");
+                if (ok) control.onControl(cmd, param(query, "ref"));
+                byte[] b = (ok ? "{\"ok\":true}" : "{\"ok\":false}").getBytes(StandardCharsets.UTF_8);
+                out.write(("HTTP/1.1 " + (ok ? "200 OK" : "400 Bad Request") + "\r\nContent-Type: application/json\r\n"
+                        + "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Private-Network: true\r\n"
+                        + "Content-Length: " + b.length + "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+                out.write(b);
+                out.flush();
+                close(c);
+                return;
+            }
             if (path.equals("/events")) {
                 c.setSoTimeout(0);
                 c.setKeepAlive(true);

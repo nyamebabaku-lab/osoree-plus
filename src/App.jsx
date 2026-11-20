@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useStore, MAX_SPAN } from './store.js';
 import { BUILTIN, blockSize, loadBible } from './lib/bible.js';
-import { refLabel, setExtraBookNames } from './lib/books.js';
+import { parseRefs, refLabel, setExtraBookNames } from './lib/books.js';
 import { IS_NATIVE, Screen, send } from './lib/output.js';
 import { useMediaUrl } from './lib/media.js';
 import { screenState, slideKey, slideTitle, stepSlide, MAX_REFS } from './lib/slides.js';
@@ -251,6 +251,26 @@ function usePhoneCamera() {
   }, [on, facing, setCamStatus]);
 }
 
+// Remote control over Wi-Fi (e.g. from the Stream Plus switcher): next / prev / clear / black / show / verse.
+function useRemoteControl(bible) {
+  useEffect(() => {
+    if (!IS_NATIVE) return undefined;
+    let handle;
+    Screen.addListener('control', (e) => {
+      const s = useStore.getState();
+      const ctx = { bible, songs: s.songs, media: s.media, songLines: s.songLines, span: s.span };
+      if (e.cmd === 'next' || e.cmd === 'prev') { const n = stepSlide(s.live, e.cmd === 'next' ? 1 : -1, ctx); if (n) s.goLive(n); }
+      else if (e.cmd === 'clear' || e.cmd === 'black') s.setMode(s.mode === e.cmd ? (s.live ? 'show' : 'clear') : e.cmd);
+      else if (e.cmd === 'show') { if (s.live) s.setMode('show'); }
+      else if (e.cmd === 'verse') {
+        const refs = parseRefs(e.ref || '');
+        if (refs) s.goLive({ type: 'verse', refs: refs.slice(0, MAX_REFS).map((r) => ({ b: r.b, c: r.c ?? 0, v: r.v ?? 0, n: r.v2 != null && r.v != null ? Math.min(MAX_SPAN, r.v2 - r.v + 1) : s.span })) });
+      }
+    }).then((h) => { handle = h; });
+    return () => handle?.remove();
+  }, [bible]);
+}
+
 // Keyboard control for laptops: → / Space / PageDown next, ← / PageUp back, C clear, B black.
 function useKeys(bible) {
   useEffect(() => {
@@ -282,6 +302,7 @@ export default function App() {
   const [cameraMode, setCameraMode] = useState(false);
   useDark(themeMode);
   useKeys(bible);
+  useRemoteControl(bible);
   useLicenceBoot();
   usePhoneCamera();
   useEffect(() => { setExtraBookNames(bible?.bookNames); }, [bible]);
