@@ -3,13 +3,14 @@ import { useStore } from '../store.js';
 import { verseText } from '../lib/bible.js';
 import { slideKey, slideTitle } from '../lib/slides.js';
 import { songSlides } from '../lib/songs.js';
+import { findSong } from '../lib/hymns.js';
 import { Empty } from '../ui.jsx';
 
 const ICON = { verse: BookOpen, song: Music, media: Image, pdf: FileText, strongs: Languages, name: UserRound };
 
 function detail(item, { bible, songs, media, people = [] }) {
   if (item.type === 'verse') return item.refs.length > 1 ? `${item.refs.length} passages together` : verseText(bible, item.refs[0].b, item.refs[0].c, item.refs[0].v);
-  if (item.type === 'song') { const s = songs.find((x) => x.id === item.songId); return s ? songSlides(s.lyrics)[0]?.lines[0] || '' : ''; }
+  if (item.type === 'song') { const s = findSong(songs, item.songId); return s ? songSlides(s.lyrics)[0]?.lines[0] || '' : ''; }
   if (item.type === 'strongs') return item.entry.def;
   if (item.type === 'name') return people.find((p) => p.id === item.personId)?.title || 'Name';
   const m = media.find((x) => x.id === item.mediaId);

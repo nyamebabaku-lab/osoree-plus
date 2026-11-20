@@ -1,6 +1,6 @@
 // A "slide" is anything the operator can put on screen:
 //   { type: 'verse', refs: [{ b, c, v, n }] }   one or more passages (combined references)
-//   { type: 'song', songId, idx }               one slide of a song
+//   { type: 'song', songId, idx }               one slide of a song (songId "h:<book>:<key>" is a hymn, lib/hymns.js)
 //   { type: 'media', mediaId }                  a picture or video
 //   { type: 'pdf', mediaId, page }              one page of a PDF
 //   { type: 'strongs', entry, word, ref }       a Strong's word study (entry from lib/strongs.js lookup)
@@ -8,6 +8,7 @@
 import { NAMES, refLabel } from './books.js';
 import { blockSize, step as stepVerse, verseText } from './bible.js';
 import { songSlides } from './songs.js';
+import { findSong, isHymn } from './hymns.js';
 import { fontStack } from './fonts.js';
 
 export const MAX_REFS = 4;
@@ -28,7 +29,7 @@ export function slideTitle(s, { bible, songs, media, people = [] }) {
   if (!s) return '';
   if (s.type === 'verse') return refsLabel(bible, s.refs);
   if (s.type === 'song') {
-    const song = songs.find((x) => x.id === s.songId);
+    const song = findSong(songs, s.songId);
     return song ? song.title : 'Song removed';
   }
   if (s.type === 'strongs') return `${s.entry.num} ${s.entry.lemma}${s.word ? ` · “${s.word}”` : ''}`;
@@ -47,7 +48,7 @@ export function stepSlide(s, dir, { bible, songs, songLines, span, media = [] })
     return p && { type: 'verse', refs: [p] };
   }
   if (s.type === 'song') {
-    const song = songs.find((x) => x.id === s.songId);
+    const song = findSong(songs, s.songId);
     const n = song ? songSlides(song.lyrics, songLines).length : 0;
     const idx = (s.idx || 0) + dir;
     return idx >= 0 && idx < n ? { ...s, idx } : null;
@@ -72,7 +73,7 @@ export function screenState(st, { bible, compare, songs, media }) {
   };
   // Pro features that are locked on this device (trial over, no licence) are left out.
   const locked = new Set(st.locked || []);
-  if (locked.has('docs') && st.live?.type === 'pdf') return screenState({ ...st, live: null }, { bible, compare, songs, media });
+  if ((locked.has('docs') && st.live?.type === 'pdf') || (locked.has('hymns') && st.live?.type === 'song' && isHymn(st.live.songId))) return screenState({ ...st, live: null }, { bible, compare, songs, media });
   // Shared by every message: the camera, the lower-third look and the scrolling ticker.
   const extra = {
     free: !!st.free, // trial over and no Pro: every screen shows the "Free version" watermark
@@ -109,7 +110,7 @@ export function screenState(st, { bible, compare, songs, media }) {
     return msg({ kind: 'verse', groups, style: look });
   }
   if (live.type === 'song') {
-    const song = songs.find((x) => x.id === live.songId);
+    const song = findSong(songs, live.songId);
     const slide = song && songSlides(song.lyrics, songLines)[live.idx || 0];
     if (!slide) return idle;
     return msg({ kind: 'song', title: song.title, lines: slide.lines, style: look });

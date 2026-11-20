@@ -28,6 +28,10 @@ export const useStore = create(persist((set, get) => {
   themeMode: 'dark', // dark | light | system
   style: DEFAULT_STYLE,
   imported: [], // [{ id, abbr, name }] — the texts themselves are in IndexedDB
+  hymnals: [], // [{ id, title, count, store }] — the hymns themselves are in IndexedDB (lib/hymns.js)
+  hymnalId: '', // the hymn book open in Songs → Hymns
+  songsView: 'songs', // Songs tab: 'songs' | 'hymns'
+  hymnRev: 0, // bumped when hymn books finish loading, so screens redraw (not saved)
   span: 1, // how many verses go on screen together
   combine: false, // tapping a verse adds it to what is showing instead of replacing it
   strongsOn: true, // in a Strong's Bible, words can be tapped for their Hebrew / Greek
@@ -98,11 +102,12 @@ export const useStore = create(persist((set, get) => {
 
   goLive: (slide) => {
     if (slide?.type === 'pdf') get().countUse('docs');
-    else if (slide?.type === 'song') get().countUse('songs');
+    else if (slide?.type === 'song') get().countUse(String(slide.songId).startsWith('h:') ? 'hymns' : 'songs');
     else if (slide?.type === 'verse') get().countUse('verses');
     // A name is a tag laid over whatever is showing: tapping it shows or hides the tag.
     if (slide.type === 'name') { get().toggleName(slide.personId); return; }
     if (slide.type === 'pdf' && !allowed('docs')) return;
+    if (slide.type === 'song' && String(slide.songId).startsWith('h:') && !allowed('hymns')) return;
     const { live, mode, combine, history, video } = get();
     let next = slide;
     if (combine && slide.type === 'verse' && live?.type === 'verse' && mode === 'show') {
@@ -194,6 +199,15 @@ export const useStore = create(persist((set, get) => {
     set({ songs: songs.some((s) => s.id === song.id) ? songs.map((s) => (s.id === song.id ? song : s)) : [song, ...songs] });
   },
   addSongs: (list) => set({ songs: [...list, ...get().songs] }),
+  addHymnal: (meta) => set({ hymnals: [...get().hymnals.filter((h) => h.id !== meta.id), meta], hymnalId: meta.id, hymnRev: get().hymnRev + 1 }),
+  removeHymnal: (id) => {
+    const { live, hymnals, hymnalId } = get();
+    const mine = (songId) => String(songId || '').startsWith(`h:${id}:`);
+    set({ hymnals: hymnals.filter((h) => h.id !== id), hymnalId: hymnalId === id ? '' : hymnalId, plan: get().plan.filter((p) => !mine(p.songId)), live: mine(live?.songId) ? null : live });
+  },
+  setHymnalId: (hymnalId) => set({ hymnalId }),
+  setSongsView: (songsView) => set({ songsView }),
+  bumpHymns: () => set({ hymnRev: get().hymnRev + 1 }),
   deleteSong: (id) => {
     const { live } = get();
     set({ songs: get().songs.filter((s) => s.id !== id), plan: get().plan.filter((p) => p.songId !== id), live: live?.songId === id ? null : live });
@@ -239,7 +253,7 @@ export const useStore = create(persist((set, get) => {
       style: { ...DEFAULT_STYLE, ...(old.style || {}) },
     };
   },
-  partialize: ({ video, camStatus, onAir, nameOn, view, pip, deviceCode, licStatus, paywall, ...rest }) => rest, // eslint-disable-line no-unused-vars
+  partialize: ({ video, camStatus, onAir, nameOn, view, pip, deviceCode, licStatus, paywall, hymnRev, ...rest }) => rest, // eslint-disable-line no-unused-vars
 }));
 
 // Is verse v of chapter c of book b part of what is showing?

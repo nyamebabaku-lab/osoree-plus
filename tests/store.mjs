@@ -72,7 +72,7 @@ async function phone() {
   const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push('app: ' + e.message));
   await p.goto('http://127.0.0.1:4871/'); await p.waitForSelector('nav'); await p.waitForTimeout(600);
   await p.locator('nav button', { hasText: 'Screen' }).click();
-  await p.getByRole('button', { name: 'Store: Bibles and backgrounds' }).first().click();
+  await p.getByRole('button', { name: 'Store: Bibles, hymns and backgrounds' }).first().click();
   await p.waitForSelector('text=Twi Bible (test)');
   return p;
 }

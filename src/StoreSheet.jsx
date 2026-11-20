@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BookOpen, Check, Clock, Download, Image as ImageIcon, ShoppingBag, Smartphone } from 'lucide-react';
+import { BookOpen, Check, Clock, Download, Image as ImageIcon, Music, ShoppingBag, Smartphone } from 'lucide-react';
 import { useStore } from './store.js';
 import { api, openCheckout } from './lib/server.js';
 import { Agree } from './Pro.jsx';
@@ -11,12 +11,12 @@ import { IS_IOS, Screen } from './lib/output.js';
 const money = (cur, n) => `${cur === 'GHS' ? 'GH₵' : cur === 'USD' ? 'US$' : (cur || '') + ' '}${Number(n).toLocaleString()}`;
 const mb = (n) => (n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB');
 
-export function StoreButton({ className = 'btn-soft w-full' }) {
+export function StoreButton({ className = 'btn-soft w-full', start = 'bible', label = 'Store: Bibles, hymns and backgrounds' }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button onClick={() => setOpen(true)} className={className}><ShoppingBag size={18} /> Store: Bibles and backgrounds</button>
-      {open && <StoreSheet onClose={() => setOpen(false)} />}
+      <button onClick={() => setOpen(true)} className={className}><ShoppingBag size={18} /> {label}</button>
+      {open && <StoreSheet start={start} onClose={() => setOpen(false)} />}
     </>
   );
 }
@@ -106,11 +106,11 @@ function LinkPhone({ onDone }) {
   );
 }
 
-export default function StoreSheet({ onClose }) {
+export default function StoreSheet({ onClose, start = 'bible' }) {
   const st = useStore();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
-  const [kind, setKind] = useState('bible');
+  const [kind, setKind] = useState(start);
   const [buying, setBuying] = useState('');
   const [working, setWorking] = useState('');
   const [note, setNote] = useState(null);
@@ -120,7 +120,7 @@ export default function StoreSheet({ onClose }) {
   const have = installedIds(st);
   const get = async (it) => {
     setNote(null); setWorking(it.id);
-    try { await install(it); setNote({ text: it.kind === 'bible' ? `${it.abbr || it.title} is ready: choose it in the Bible version list.` : `${it.title} is in Media and in Screen → Text background.` }); await loadStore().then(setData); }
+    try { await install(it); setNote({ text: it.kind === 'bible' ? `${it.abbr || it.title} is ready: choose it in the Bible version list.` : it.kind === 'hymnal' ? `${it.title} is ready in Songs → Hymns.` : `${it.title} is in Media and in Screen → Text background.` }); await loadStore().then(setData); }
     catch (e) { setNote({ text: e.message, bad: true }); } finally { setWorking(''); }
   };
   // iPhone (App Store rules): free items, what the church owns, and items sold through the App Store.
@@ -152,7 +152,7 @@ export default function StoreSheet({ onClose }) {
   return (
     <Sheet title="Store" onClose={onClose}>
       <div className="space-y-3">
-        <Seg label="Store section" value={kind} onChange={setKind} options={[['bible', 'Bibles'], ['background', 'Backgrounds']]} />
+        <Seg label="Store section" value={kind} onChange={setKind} options={[['bible', 'Bibles'], ['hymnal', 'Hymns'], ['background', 'Backgrounds']]} />
         {error && <p className="text-sm text-red-600 dark:text-red-400">{/internet/i.test(error) ? 'Connect to the internet to open the store.' : error}</p>}
         {!data && !error && <Empty>Opening the store…</Empty>}
         {data && !items.length && <Empty>Nothing here yet.</Empty>}
@@ -165,7 +165,7 @@ export default function StoreSheet({ onClose }) {
               <div key={it.id} className={`card space-y-2 p-3 ${kind === 'background' ? '' : ''}`} aria-label={it.title}>
                 {it.thumb && <img src={it.thumb} alt="" className="aspect-video w-full rounded-lg object-cover" />}
                 <div className="flex items-start gap-2">
-                  {it.kind === 'bible' ? <BookOpen size={18} className="mt-0.5 shrink-0 text-gold-500" /> : <ImageIcon size={16} className="mt-0.5 shrink-0 text-gold-500" />}
+                  {it.kind === 'bible' ? <BookOpen size={18} className="mt-0.5 shrink-0 text-gold-500" /> : it.kind === 'hymnal' ? <Music size={18} className="mt-0.5 shrink-0 text-gold-500" /> : <ImageIcon size={16} className="mt-0.5 shrink-0 text-gold-500" />}
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-bold">{it.title}{it.abbr ? <span className="text-stone-500"> · {it.abbr}</span> : null}</div>
                     {it.lang && <div className="text-xs text-stone-500">{it.lang}</div>}

@@ -361,7 +361,7 @@ const ADMIN = {
     const cur = await settings(d);
     const next = { ...cur };
     if (b.trialDays != null) { need(Number.isInteger(b.trialDays) && b.trialDays >= 0 && b.trialDays <= 365, 'Trial: 0 to 365 days.'); next.trialDays = b.trialDays; }
-    if (b.pro) { need(Array.isArray(b.pro) && b.pro.every((f) => ['stream', 'live', 'wifi', 'docs', 'watermark', 'backup', 'listen', 'strongs'].includes(f)), 'Unknown feature.'); next.pro = b.pro; }
+    if (b.pro) { need(Array.isArray(b.pro) && b.pro.every((f) => ['stream', 'live', 'wifi', 'docs', 'watermark', 'backup', 'listen', 'strongs', 'hymns'].includes(f)), 'Unknown feature.'); next.pro = b.pro; }
     if (b.prices) { for (const [k, v] of Object.entries(b.prices)) need(PRODUCTS[k] && Number(v) >= 0 && Number(v) < 100000, 'Bad price.'); next.prices = { ...cur.prices, ...Object.fromEntries(Object.entries(b.prices).map(([k, v]) => [k, Number(v)])) }; }
     if (b.pricesUSD) { for (const [k, v] of Object.entries(b.pricesUSD)) need(PRODUCTS[k] && Number(v) >= 0 && Number(v) < 10000, 'Bad US$ price.'); next.pricesUSD = { ...(cur.pricesUSD || {}), ...Object.fromEntries(Object.entries(b.pricesUSD).map(([k, v]) => [k, Number(v)])) }; }
     if (b.paystackUSD != null) next.paystackUSD = !!b.paystackUSD;
@@ -500,10 +500,10 @@ const ADMIN = {
   },
   async storeItems(d) { return (await d.query('select * from store_items order by kind, sort, created_at desc')).map((i) => ({ ...i, price: Number(i.price), price_usd: Number(i.price_usd || 0), file_size: Number(i.file_size || 0) })); },
   async storeSave(d, b) {
-    need(['bible', 'background'].includes(b.kind), 'Kind: bible or background.');
+    need(['bible', 'background', 'hymnal'].includes(b.kind), 'Kind: bible, background or hymnal.');
     need(String(b.title || '').trim(), 'Give the item a title.');
     need(Number(b.price) >= 0 && Number(b.price) < 100000, 'Bad price.');
-    const id = b.id || (b.kind === 'bible' ? 'B' : 'G') + d.random(9);
+    const id = b.id || ({ bible: 'B', hymnal: 'H' }[b.kind] || 'G') + d.random(9);
     const f = { title: String(b.title).trim().slice(0, 80), abbr: b.abbr ? String(b.abbr).trim().slice(0, 16) : null, lang: b.lang ? String(b.lang).slice(0, 40) : null,
       description: b.description ? String(b.description).slice(0, 300) : null, copyright: b.copyright ? String(b.copyright).slice(0, 300) : null, price: Number(b.price) || 0, priceUsd: Number(b.price_usd) || 0,
       thumb: b.thumb && String(b.thumb).startsWith('data:image/') && b.thumb.length < 200000 ? b.thumb : null, active: !!b.active, sort: Number(b.sort) || 0,
@@ -517,12 +517,12 @@ const ADMIN = {
   async storeUploadUrl(d, b) {
     const [item] = await d.query('select id, kind from store_items where id = $1', [b.id]);
     need(item, 'Save the item first.', 404);
-    const ext = item.kind === 'bible' ? 'json.gz' : /^video\//.test(b.type) ? 'mp4' : /png/.test(b.type) ? 'png' : 'jpg';
+    const ext = item.kind === 'bible' || item.kind === 'hymnal' ? 'json.gz' : /^video\//.test(b.type) ? 'mp4' : /png/.test(b.type) ? 'png' : 'jpg';
     const path = `${item.kind}/${item.id}-${d.random(6)}.${ext}`;
     return { path, ...(await d.storage.signUpload(path)) };
   },
   async storeFileDone(d, b) {
-    need(b.path && /^(bible|background)\/[A-Z0-9]+-[A-Z0-9]+\.(json\.gz|mp4|png|jpg)$/.test(b.path), 'Bad file.');
+    need(b.path && /^(bible|background|hymnal)\/[A-Z0-9]+-[A-Z0-9]+\.(json\.gz|mp4|png|jpg)$/.test(b.path), 'Bad file.');
     await d.query('update store_items set file_path = $2, file_type = $3, file_size = $4 where id = $1', [b.id, b.path, String(b.type || '').slice(0, 40), Number(b.size) || 0]);
     return { ok: true };
   },

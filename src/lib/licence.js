@@ -18,6 +18,7 @@ export const FEATURES = {
   backup: 'Backup and restore',
   listen: 'Scripture listener (hears references from the preacher)',
   strongs: 'KJV+ with Strong’s word meanings (Greek and Hebrew)',
+  hymns: 'Hymn books: find any hymn by number, import OpenLyrics / OpenSong / ProPresenter files',
 };
 export const DEFAULT_POLICY = { trialDays: 30, pro: Object.keys(FEATURES) };
 

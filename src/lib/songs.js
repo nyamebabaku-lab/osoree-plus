@@ -1,6 +1,6 @@
 // Songs: lyrics are plain text. A blank line starts a new slide; a line such as
 // "Chorus", "[Verse 2]" or "Bridge:" names the slide that follows and is not shown on screen.
-const LABEL = /^\s*\[?\s*((verse|v|chorus|c|refrain|pre-?chorus|bridge|b|tag|ending|intro|outro|interlude|stanza)\s*\d*)\s*\]?\s*:?\s*$/i;
+export const LABEL = /^\s*\[?\s*((verse|v|chorus|c|refrain|pre-?chorus|bridge|b|tag|ending|intro|outro|interlude|stanza)\s*\d*)\s*\]?\s*:?\s*$/i;
 
 export function songSlides(lyrics, maxLines = 0) {
   const slides = [];

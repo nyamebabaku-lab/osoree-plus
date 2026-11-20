@@ -220,7 +220,7 @@ function RequestsTab({ onChange }) {
             <b>{money(r.amount, r.currency)}</b>
           </div>
           <div>MoMo transaction: <b className="select-all font-mono">{r.momo_ref}</b> · from <b>{r.phone}</b></div>
-          <div className="text-xs text-stone-500">{r.item_id ? `${r.item_kind === 'bible' ? 'Bible' : 'Background'}: ${r.item_title}` : PRODUCT[r.product]} · {r.device_code} · {when(r.created_at)}{r.reason ? ` · ${r.reason}` : ''}</div>
+          <div className="text-xs text-stone-500">{r.item_id ? `${({ bible: 'Bible', hymnal: 'Hymn book' }[r.item_kind] || 'Background')}: ${r.item_title}` : PRODUCT[r.product]} · {r.device_code} · {when(r.created_at)}{r.reason ? ` · ${r.reason}` : ''}</div>
           {r.status === 'pending' && (
             <div className="flex gap-2 pt-1">
               <button disabled={busy === r.id} onClick={() => act(r.id, () => admin('approveRequest', { id: r.id }), `Approved. ${r.church || r.phone} gets Pro the next time the app is online.`)} className="btn flex-1 bg-green-600 text-white"><Check size={16} /> Approve</button>
@@ -248,6 +248,14 @@ async function bibleFile(file) {
   if (verses < 100) throw new Error('This file has almost no verses. Check it is a Bible XML file.');
   return { blob: new Blob([gzipSync(new TextEncoder().encode(JSON.stringify(bible)), { level: 9 })]), type: 'bible-json-gz', abbr: bible.abbr, title: bible.name, verses };
 }
+// Hymn files (OpenLyrics / OpenSong / ProPresenter 6, or zips of them) become one hymn book, gzipped.
+async function hymnalFile(files, title) {
+  const { hymnalFromFiles } = await import('../lib/hymn-import.js');
+  const picked = await Promise.all(files.map(async (f) => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) })));
+  const { hymnal, skipped } = hymnalFromFiles(picked, title);
+  if (!hymnal.hymns.length) throw new Error('No hymns found. Use OpenLyrics, OpenSong or ProPresenter 6 files, or a zip of them.');
+  return { blob: new Blob([gzipSync(new TextEncoder().encode(JSON.stringify(hymnal)), { level: 9 })]), type: 'hymnal-json-gz', title: hymnal.title, hymns: hymnal.hymns.length, skipped: skipped.length };
+}
 // A small picture for the store list, from a picture or the first second of a video.
 function thumbOf(file) {
   return new Promise((resolve) => {
@@ -262,16 +270,20 @@ function StoreTab() {
   const list = useLoad(() => admin('storeItems'), []);
   const [f, setF] = useState(BLANK);
   const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState('');
+  const KIND = { bible: 'Bible XML (or zip)', hymnal: 'hymn files (or a zip)', background: 'picture or MP4 video' };
   const save = async () => {
     setMsg(null);
     try {
-      if (!f.id && !file) throw new Error(`Choose the ${f.kind === 'bible' ? 'Bible XML (or zip)' : 'picture or MP4 video'} first.`);
+      const chosen = f.kind === 'hymnal' ? files.length > 0 : !!file;
+      if (!f.id && !chosen) throw new Error(`Choose the ${KIND[f.kind]} first.`);
       let up = null, thumb;
-      if (file) {
+      if (chosen) {
         setBusy('Reading the file…');
-        if (f.kind === 'bible') up = await bibleFile(file);
+        if (f.kind === 'hymnal') up = await hymnalFile(files, f.title);
+        else if (f.kind === 'bible') up = await bibleFile(file);
         else {
           if (!/^(image\/(jpeg|png)|video\/mp4)$/.test(file.type)) throw new Error('Backgrounds: JPG, PNG or MP4.');
           if (file.size > 45e6) throw new Error('Keep background files under 45 MB.');
@@ -284,28 +296,30 @@ function StoreTab() {
       if (up) {
         setBusy('Uploading…');
         const u = await admin('storeUploadUrl', { id, type: up.type });
-        const r = await fetch(u.url, { method: 'PUT', headers: { 'Content-Type': f.kind === 'bible' ? 'application/gzip' : up.type }, body: up.blob });
+        const r = await fetch(u.url, { method: 'PUT', headers: { 'Content-Type': f.kind === 'background' ? up.type : 'application/gzip' }, body: up.blob });
         if (!r.ok) throw new Error('The upload failed. Check the internet and try again.');
         await admin('storeFileDone', { id, path: u.path, type: up.type, size: up.blob.size });
       }
-      setMsg({ text: `Saved${up?.verses ? ` (${up.verses.toLocaleString()} verses)` : ''}. ${meta.active ? 'Churches see it in the store now.' : 'Hidden until you tick "Show in the store".'}` });
-      setF(BLANK); setFile(null); list.reload();
+      setMsg({ text: `Saved${up?.verses ? ` (${up.verses.toLocaleString()} verses)` : ''}${up?.hymns ? ` (${up.hymns.toLocaleString()} hymns${up.skipped ? `; ${up.skipped} files were not hymns` : ''})` : ''}. ${meta.active ? 'Churches see it in the store now.' : 'Hidden until you tick "Show in the store".'}` });
+      setF(BLANK); setFile(null); setFiles([]); list.reload();
     } catch (e) { setMsg({ text: e.message, bad: true }); } finally { setBusy(''); }
   };
   return (
     <div className="space-y-4">
       <section className="card space-y-2 p-4">
         <div className="label">{f.id ? 'Edit item' : 'Add to the store'}</div>
-        {!f.id && <Seg label="Item kind" value={f.kind} onChange={(kind) => { setF({ ...f, kind }); setFile(null); }} options={[['bible', 'Bible'], ['background', 'Background']]} />}
-        <label className="block text-xs font-semibold">{f.kind === 'bible' ? 'Bible file (XML, or zip with one XML)' : 'Picture (JPG/PNG) or MP4 video'}{f.id ? ' — only to replace it' : ''}
-          <input type="file" className="mt-1 block w-full text-sm" accept={f.kind === 'bible' ? '.xml,.zip' : 'image/jpeg,image/png,video/mp4'} onChange={(e) => setFile(e.target.files[0] || null)} aria-label="Store file" /></label>
-        <input className="field" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder={f.kind === 'bible' ? 'Title, e.g. Twi Bible (1964) — or leave empty to use the file’s' : 'Title, e.g. Golden cross'} aria-label="Item title" />
-        {f.kind === 'bible' && <div className="grid grid-cols-2 gap-2">
+        {!f.id && <Seg label="Item kind" value={f.kind} onChange={(kind) => { setF({ ...f, kind }); setFile(null); setFiles([]); }} options={[['bible', 'Bible'], ['hymnal', 'Hymn book'], ['background', 'Background']]} />}
+        <label className="block text-xs font-semibold">{{ bible: 'Bible file (XML, or zip with one XML)', hymnal: 'Hymn files: OpenLyrics, OpenSong or ProPresenter 6 (pick many, or one zip)', background: 'Picture (JPG/PNG) or MP4 video' }[f.kind]}{f.id ? ' — only to replace it' : ''}
+          {f.kind === 'hymnal'
+            ? <input type="file" multiple className="mt-1 block w-full text-sm" accept=".xml,.zip,.pro6,.song,.osl" onChange={(e) => setFiles([...e.target.files])} aria-label="Store file" />
+            : <input type="file" className="mt-1 block w-full text-sm" accept={f.kind === 'bible' ? '.xml,.zip' : 'image/jpeg,image/png,video/mp4'} onChange={(e) => setFile(e.target.files[0] || null)} aria-label="Store file" />}</label>
+        <input className="field" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder={{ bible: 'Title, e.g. Twi Bible (1964) — or leave empty to use the file’s', hymnal: 'Title, e.g. Golden Bells hymns (public domain)', background: 'Title, e.g. Golden cross' }[f.kind]} aria-label="Item title" />
+        {f.kind !== 'background' && <div className="grid grid-cols-2 gap-2">
           <input className="field" value={f.abbr} onChange={(e) => setF({ ...f, abbr: e.target.value })} placeholder="Short name, e.g. TWI" aria-label="Short name" />
           <input className="field" value={f.lang} onChange={(e) => setF({ ...f, lang: e.target.value })} placeholder="Language" aria-label="Language" />
         </div>}
         <input className="field" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} placeholder="Description (optional)" aria-label="Description" />
-        {f.kind === 'bible' && <input className="field" value={f.copyright} onChange={(e) => setF({ ...f, copyright: e.target.value })} placeholder="Copyright / licence, e.g. Public domain, or © Bible Society of Ghana, used with permission" aria-label="Copyright" />}
+        {f.kind !== 'background' && <input className="field" value={f.copyright} onChange={(e) => setF({ ...f, copyright: e.target.value })} placeholder="Copyright / licence, e.g. Public domain, or © Bible Society of Ghana, used with permission" aria-label="Copyright" />}
         {Number(f.price) > 0 && <details className="text-xs"><summary className="cursor-pointer font-semibold">Sell on iPhone / Google Play too</summary>
           <p className="my-1 text-stone-500">Create a matching non-consumable product in App Store Connect / Play Console, then type its product ID here. Without it, iPhone and Play Store users only see this item if their church already owns it.</p>
           <input className="field mt-1" value={f.apple_product || ''} onChange={(e) => setF({ ...f, apple_product: e.target.value })} placeholder="App Store product ID, e.g. com.osoree.plus.bible.twi" aria-label="App Store product ID" />
@@ -317,9 +331,10 @@ function StoreTab() {
         </div>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} className="h-4 w-4 accent-green-600" aria-label="Show in the store" />Show in the store</label>
         {f.kind === 'bible' && <p className="text-xs text-amber-700 dark:text-amber-400">Only upload Bibles you are allowed to share or sell (public domain, or with the publisher’s written permission).</p>}
+        {f.kind === 'hymnal' && <p className="text-xs text-amber-700 dark:text-amber-400">Only upload hymns you may sell: public domain (words written before about 1929), your own, or with the owner’s written permission. Church hymn books (MHB, PCG, Ndwom and others) usually belong to the church or publisher.</p>}
         <div className="flex gap-2">
           <button onClick={save} disabled={!!busy} className="btn flex-1 bg-green-600 text-white"><Upload size={16} /> {busy || (f.id ? 'Save changes' : 'Upload')}</button>
-          {f.id && <button onClick={() => { setF(BLANK); setFile(null); }} className="btn-soft">Cancel</button>}
+          {f.id && <button onClick={() => { setF(BLANK); setFile(null); setFiles([]); }} className="btn-soft">Cancel</button>}
         </div>
         <Msg m={msg} />
       </section>
@@ -328,7 +343,7 @@ function StoreTab() {
         {list.data && !list.data.length && <Empty>Nothing yet.</Empty>}
         {list.data?.map((it) => (
           <div key={it.id} className="card flex items-center gap-3 p-3 text-sm">
-            {it.thumb ? <img src={it.thumb} alt="" className="h-10 w-16 rounded object-cover" /> : <span className="grid h-10 w-16 place-items-center rounded bg-gold-500/15 text-xs font-bold">{it.abbr || 'BIBLE'}</span>}
+            {it.thumb ? <img src={it.thumb} alt="" className="h-10 w-16 rounded object-cover" /> : <span className="grid h-10 w-16 place-items-center rounded bg-gold-500/15 text-xs font-bold">{it.abbr || (it.kind === 'hymnal' ? 'HYMNS' : 'BIBLE')}</span>}
             <div className="min-w-0 flex-1">
               <div className="truncate font-bold">{it.title}</div>
               <div className="text-xs text-stone-500">{it.price ? money(it.price, it.currency) : 'Free'}{Number(it.price_usd) > 0 ? ` · ${money(it.price_usd, 'USD')} abroad` : ''} · {it.active ? 'showing' : 'hidden'}{it.file_path ? '' : ' · no file yet!'}</div>

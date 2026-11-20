@@ -5,10 +5,11 @@ import { api } from './server.js';
 import { getDeviceCode } from './licence.js';
 import { saveImported } from './bible.js';
 import { tx } from './db.js';
+import { saveHymnal } from './hymns.js';
 import { IS_NATIVE, Screen } from './output.js';
 import { notify } from './notify.js';
 
-export const installedIds = (st) => new Set([...st.imported.filter((b) => b.store).map((b) => b.store), ...st.media.filter((m) => m.store).map((m) => m.store)]);
+export const installedIds = (st) => new Set([...st.imported, ...st.media, ...(st.hymnals || [])].filter((x) => x.store).map((x) => x.store));
 
 export async function loadStore() {
   const device = useStore.getState().deviceCode || await getDeviceCode();
@@ -25,7 +26,16 @@ export async function install(item) {
     const device = useStore.getState().deviceCode || await getDeviceCode();
     const { url } = await api('store-download', { device, itemId: item.id });
     const st = useStore.getState();
-    if (item.kind === 'bible') {
+    if (item.kind === 'hymnal') {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('The download did not finish. Try again.');
+      let bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes[0] === 0x1f && bytes[1] === 0x8b) bytes = gunzipSync(bytes);
+      const book = JSON.parse(new TextDecoder().decode(bytes));
+      const id = 'store-' + item.id.toLowerCase();
+      await saveHymnal(id, { ...book, title: item.title, copyright: item.copyright || book.copyright || '' });
+      useStore.getState().addHymnal({ id, title: item.title, count: book.hymns.length, store: item.id });
+    } else if (item.kind === 'bible') {
       const res = await fetch(url);
       if (!res.ok) throw new Error('The download did not finish. Try again.');
       let bytes = new Uint8Array(await res.arrayBuffer());
@@ -63,7 +73,7 @@ export async function syncStore() {
     if (have.has(it.id) || !r.owned.includes(it.id)) continue;
     try {
       await install(it);
-      if (it.price > 0) notify(`${it.title} is installed`, it.kind === 'bible' ? 'Your payment was confirmed. Choose it in the Bible version list.' : 'Your payment was confirmed. Find it in Media and as a text background.');
+      if (it.price > 0) notify(`${it.title} is installed`, it.kind === 'bible' ? 'Your payment was confirmed. Choose it in the Bible version list.' : it.kind === 'hymnal' ? 'Your payment was confirmed. Find it in Songs → Hymns.' : 'Your payment was confirmed. Find it in Media and as a text background.');
     } catch { /* tried again next time */ }
   }
   return r;

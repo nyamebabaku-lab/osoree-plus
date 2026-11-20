@@ -9,6 +9,7 @@ import { parseRefs, refLabel, setExtraBookNames } from './lib/books.js';
 import { IS_NATIVE, Screen, send } from './lib/output.js';
 import { useMediaUrl } from './lib/media.js';
 import { screenState, slideKey, slideTitle, stepSlide, MAX_REFS } from './lib/slides.js';
+import { loadHymnals } from './lib/hymns.js';
 import BibleTab from './tabs/BibleTab.jsx';
 import SongsTab from './tabs/SongsTab.jsx';
 import MediaTab from './tabs/MediaTab.jsx';
@@ -306,6 +307,9 @@ export default function App() {
   useLicenceBoot();
   usePhoneCamera();
   useEffect(() => { setExtraBookNames(bible?.bookNames); }, [bible]);
+  // Hymn books live in IndexedDB: load them once so hymns can be shown, planned and stepped through.
+  const hymnIds = state.hymnals.map((h) => h.id).join(',');
+  useEffect(() => { loadHymnals(hymnIds ? hymnIds.split(',') : []).then((changed) => { if (changed) useStore.getState().bumpHymns(); }); }, [hymnIds]);
 
   // Keep every screen in step with the operator.
   // KJV+ needs Pro after the trial: a device left on it goes back to the KJV.
@@ -315,6 +319,11 @@ export default function App() {
     if (versionId === 'kjvs') useStore.setState({ versionId: 'kjv' });
     if (compareId === 'kjvs') useStore.setState({ compareId: '' });
   }, [strongsLocked, versionId, compareId]);
+  // Hymn books need Pro after the trial: a hymn left on screen is cleared.
+  const hymnsLocked = lockedFeatures(state.licStatus).includes('hymns');
+  useEffect(() => {
+    if (hymnsLocked && String(state.live?.songId || '').startsWith('h:')) useStore.setState({ live: null });
+  }, [hymnsLocked, state.live]);
   const message = state.blocked ? { kind: 'black', style: {} } : bible ? screenState({ ...state, locked: lockedFeatures(state.licStatus), free: state.licStatus?.state === 'free' }, { bible, compare: compareId ? compare : null, songs, media }) : null;
   const json = message ? JSON.stringify(message) : '';
   useEffect(() => { if (json) send(JSON.parse(json)); }, [json]);
