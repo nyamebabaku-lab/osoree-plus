@@ -91,11 +91,20 @@ export function useLicenceBoot() {
       } catch { /* offline: the saved status stands */ }
     };
     refresh().then(sync);
+    // Back from the payment page (or any other app): check a waiting payment straight away.
+    const back = () => {
+      if (document.visibilityState !== 'visible') return;
+      const g = useStore.getState();
+      if (g.pendingPay) checkPayment(g.pendingPay).catch(() => {});
+      if (g.storePending) syncStore().catch(() => {});
+    };
+    document.addEventListener('visibilitychange', back);
+    document.addEventListener('resume', back);
     const q = setInterval(() => { const g = useStore.getState(); if (g.pendingReq) checkRequest().catch(() => {}); if (g.storePending) syncStore().catch(() => {}); }, 30 * 1000);
     const t = setInterval(() => refresh(), 5 * 60 * 1000);
     const s = setInterval(sync, 6 * 60 * 60 * 1000);
     window.osoreeCheckNow = sync; // "Check for updates" in Settings
-    return () => { on = false; clearInterval(t); clearInterval(s); clearInterval(q); };
+    return () => { on = false; clearInterval(t); clearInterval(s); clearInterval(q); document.removeEventListener('visibilitychange', back); document.removeEventListener('resume', back); };
   }, [setLicState]);
   useEffect(() => { recompute(setLicState); }, [licence, policy, setLicState]);
 }

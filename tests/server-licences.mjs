@@ -62,6 +62,7 @@ fakeProvider.fn = (u, body) => (u.includes('/initialize') ? { json: { status: tr
 const b2 = await call('buy', { device: B, product: 'pro', phone: '0240000002' });
 const init = calls.find((c) => c.u.includes('/initialize'));
 const ib = JSON.parse(init.o.body);
+ok('after paying, Paystack returns to our page that opens the app', ib.callback_url === `https://nyamebabaku-lab.github.io/osoree-plus/paid.html?ref=${b2.ref}`, ib.callback_url);
 ok('Paystack checkout started with the right amount', b2.url === 'https://checkout.paystack.com/abc' && ib.amount === 35000 && ib.currency === 'GHS' && ib.reference === b2.ref && ib.channels.includes('mobile_money'));
 const hmacOf = async (raw) => crypto.createHmac('sha512', envs.PAYSTACK_SECRET_KEY).update(raw).digest('hex');
 const ev = (amount) => JSON.stringify({ event: 'charge.success', data: { reference: b2.ref, amount, currency: 'GHS', id: 99 } });

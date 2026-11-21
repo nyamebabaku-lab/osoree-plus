@@ -147,7 +147,8 @@ async function buy(d, { device, product, phone, email, church, itemId, sim, coun
   await d.query('insert into payments (id, device_code, product, amount, currency, phone, email, church, provider, list_amount, list_currency, region, item_id) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
     [id, device, product, amount, currency, ph, email || null, church || null, provider, list, listCur, region, item?.id || null]);
   const fn = d.env('FN_URL');
-  const done = `${fn}/done?ref=${id}`;
+  // After paying, Paystack sends the customer to our web page, which opens the app again (Android) or says to go back.
+  const done = `${d.env('SITE_URL') || 'https://nyamebabaku-lab.github.io/osoree-plus/'}paid.html?ref=${id}`;
   let url;
   if (provider === 'test') {
     url = `${fn}/test-pay?ref=${id}`;
