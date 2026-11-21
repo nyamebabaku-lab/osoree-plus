@@ -127,12 +127,77 @@ function parsePro6(doc, fileName) {
   return { n: numberFrom(fileName), title: clean(root.getAttribute('CCLISongTitle')) || name, author: clean(root.getAttribute('CCLIAuthor')), lyrics: slides.join('\n\n'), book: '' };
 }
 
+// ---------------------------------------------------------------- Zefania XML used as a whole hymn book
+// <XMLBIBLE><BIBLEBOOK><CHAPTER cnumber="12"> is hymn 12; each <VERS> is a stanza; <CAPTION>s hold the Bible
+// reference and the writers. A chorus starts inside a stanza with "Nnyeso:" (Twi), "Chorus:" or "Refrain:";
+// later stanzas often give only its first words and "n.a." / "…", so the full chorus is repeated instead.
+// Twi "Nnyeso(ɔ)" is often garbled in converted files ("Nnyesyesyeso:yeso:o:", "noNnyeso:"), so any run of its letters counts.
+const TWI_MARK = /Nn*y[eɛysoɔ]*s[eɛysoɔ:]*/g;
+const CHORUS = /^\s*(?:Nny[eɛysoɔ]*s[eɛysoɔ:]*|(?:chorus|refrain|ref)\s*:)/i;
+const CHORUS_ANY = /(?:chorus|refrain)\s*:/gi;
+const ABBR = /\s*(n\.\s?a\.?|etc\.?|\.\.\.|…)\s*$/i;
+function stanzaAndChorus(text) {
+  const lines = text.replace(/\r/g, '').split('\n');
+  const at = lines.findIndex((l) => CHORUS.test(l));
+  if (at < 0) return { stanza: text, chorus: '' };
+  const chorus = lines.slice(at).join('\n').replace(TWI_MARK, ' ').replace(CHORUS_ANY, ' ').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').trim();
+  return { stanza: lines.slice(0, at).join('\n'), chorus };
+}
+function parseZefaniaHymns(doc) {
+  const root = doc.documentElement;
+  const info = first(root, 'INFORMATION') || root;
+  const books = byName(root, 'BIBLEBOOK');
+  const about = [root.getAttribute('biblename'), first(info, 'title')?.textContent, first(info, 'subject')?.textContent, books[0]?.getAttribute('bname')].join(' ');
+  // A real Bible (many books, nothing about hymns) belongs in Bible → Import, not here.
+  if (books.length > 3 && !/hymn|song|ndwom|nnwom|dwom|chant|psalter/i.test(about)) return { bible: true, hymns: [] };
+  const hymns = [];
+  for (const ch of byName(root, 'CHAPTER')) {
+    const kids = [...ch.children];
+    const caps = kids.filter((e) => e.localName === 'CAPTION').map((e) => clean(e.textContent).replace(/^[!\s]+/, '')).filter(Boolean);
+    // A stanza that holds "3. …" lines (merged in the source) is split there into separate stanzas.
+    const parts = kids.filter((e) => e.localName === 'VERS')
+      .flatMap((v) => v.textContent.replace(/\r/g, '').split(/\n(?=\s*\d{1,2}\.\s)/).map((t, i) => (i ? t.replace(/^\s*\d{1,2}\.\s*/, '') : t)))
+      .map(stanzaAndChorus);
+    const choruses = parts.map((p) => p.chorus).filter(Boolean);
+    const full = choruses.filter((c) => !ABBR.test(c)).sort((a, b) => b.length - a.length)[0]
+      || choruses.map((c) => c.replace(ABBR, '')).sort((a, b) => b.length - a.length)[0] || '';
+    // "O, yiw, wo ho hia me. n.a" (no chorus mark): the shortened start of the chorus, or of a refrain
+    // printed in full in the first stanza. It is replaced by the full lines.
+    const norm = (t) => t.toLowerCase().replace(/[^\p{L}\p{N} ]+/gu, '').replace(/\s+/g, ' ').trim();
+    const firstLines = clean(parts[0]?.stanza || '').split('\n');
+    parts.forEach((p, i) => {
+      const lines = clean(p.stanza).split('\n');
+      const at = lines.findIndex((l) => ABBR.test(l));
+      if (at < 0) return;
+      const start = norm(lines[at].replace(ABBR, ''));
+      const head = lines.slice(0, at).join('\n');
+      if (start && full && norm(full).startsWith(start)) { p.stanza = head; p.chorus ||= full; return; }
+      const k = i > 0 && start ? firstLines.findIndex((l) => norm(l).startsWith(start)) : -1;
+      p.stanza = k >= 0 ? [head, ...firstLines.slice(k)].join('\n') : [...lines.slice(0, at), lines[at].replace(ABBR, ''), ...lines.slice(at + 1)].join('\n');
+    });
+    const out = [];
+    parts.forEach((p, i) => {
+      const st = block(`Verse ${i + 1}`, p.stanza);
+      if (st) out.push(st);
+      if (p.chorus && full) out.push(block('Chorus', full));
+    });
+    if (!out.length) continue;
+    const firstLine = clean(parts[0]?.stanza || '').split('\n')[0].replace(/[,;:.!]+$/, '');
+    hymns.push({ n: ch.getAttribute('cnumber') || '', title: firstLine || `Hymn ${hymns.length + 1}`, author: caps.join(' · '), lyrics: out.join('\n\n') });
+  }
+  return { book: clean(first(info, 'title')?.textContent) || clean(root.getAttribute('biblename')) || books[0]?.getAttribute('bname') || '', lang: clean(first(info, 'language')?.textContent), hymns };
+}
+
+function parseXml(bytes) {
+  const text = decodeXml(bytes).replace(/^\uFEFF/, '');
+  if (!/^\s*</.test(text)) return null;
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  return doc.getElementsByTagName('parsererror').length ? null : doc;
+}
+
 /** One hymn from one file, or null when the file is not a hymn this app understands. */
-export function parseHymnFile(fileName, bytes) {
-  const text = decodeXml(bytes);
-  if (!/^\s*(<\?xml|<)/.test(text.replace(/^﻿/, ''))) return null;
-  const doc = new DOMParser().parseFromString(text.replace(/^﻿/, ''), 'application/xml');
-  if (doc.getElementsByTagName('parsererror').length) return null;
+export function parseHymnFile(fileName, bytes, doc = parseXml(bytes)) {
+  if (!doc) return null;
   const root = doc.documentElement.localName;
   const h = root === 'song' && first(doc.documentElement, 'lyrics')?.getElementsByTagName('*').length ? parseOpenLyrics(doc, fileName)
     : root === 'song' ? parseOpenSong(doc, fileName)
@@ -146,9 +211,18 @@ export function parseHymnFile(fileName, bytes) {
 export function hymnalFromFiles(files, title = '') {
   const hymns = [], skipped = [];
   let book = '';
+  let lang = '', bible = false;
   const take = (name, bytes) => {
     if (SKIP.test(name) || !/(\.(xml|pro6|osl|song)|^[^.]+)$/i.test(name.split('/').pop())) return;
-    const h = parseHymnFile(name, bytes);
+    const doc = parseXml(bytes);
+    if (doc?.documentElement.localName === 'XMLBIBLE') { // a whole hymn book in one Zefania file
+      const z = parseZefaniaHymns(doc);
+      if (z.bible) { bible = true; skipped.push(`${name.split('/').pop()} (a Bible: add it in Bible → Import)`); return; }
+      book ||= z.book; lang ||= z.lang;
+      z.hymns.forEach((h) => hymns.push({ ...h, n: String(h.n).trim() }));
+      return;
+    }
+    const h = parseHymnFile(name, bytes, doc);
     if (!h) { skipped.push(name.split('/').pop()); return; }
     book ||= h.book;
     hymns.push({ n: String(h.n || '').trim(), title: h.title, author: h.author, lyrics: h.lyrics });
@@ -161,7 +235,7 @@ export function hymnalFromFiles(files, title = '') {
     } else if (/\.pro$/i.test(f.name)) skipped.push(`${f.name} (ProPresenter 7: export as ProPresenter 6 or OpenLyrics)`);
     else take(f.name, f.bytes);
   }
-  return { hymnal: tidyHymnal({ title: title || book || 'My hymns', hymns }), skipped };
+  return { hymnal: tidyHymnal({ title: title || book || 'My hymns', lang, hymns }), skipped, bible };
 }
 
 /** Numbers sorted 1, 2, 10; hymns without a number after them by title; every hymn gets a unique key k. */

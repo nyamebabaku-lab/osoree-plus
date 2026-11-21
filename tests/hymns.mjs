@@ -108,6 +108,40 @@ await page.getByLabel('Remove this hymn book').click(); await page.waitForTimeou
 ok('hymn book removed', (await page.getByLabel('Hymn book').locator('option').count()) === 1);
 ok('first book still projecting', (await live()).title === '1 Amazing Grace');
 
+// a whole hymn book in one Zefania XML file (CHAPTER = hymn, VERS = stanza, "Nnyeso:" = chorus, "n.a." = and so on)
+const zef = `\uFEFF<?xml version="1.0" encoding="utf-8"?>
+<XMLBIBLE biblename="Test Twi Hymns" type="x-bible"><INFORMATION><title>Test Twi Hymns</title><subject>Hymns</subject><language>TWI</language></INFORMATION>
+<BIBLEBOOK bnumber="1" bname="Test Twi Hymns">
+<CHAPTER cnumber="1"><CAPTION vref="1">Dw. 23</CAPTION><CAPTION vref="1">! ! ! O.A.B., 1964</CAPTION>
+<VERS vnumber="1">Monkamfo Nyankopɔn
+mo anom ne koma mu.
+Nnyesyesyeso:yeso:o: Ayeyi nka no
+daa daa nyinaa.</VERS>
+<VERS vnumber="2">Yɛn nkwamafo ne no,
+ahohia mu gyefo;
+Nnyeso: Ayeyi n.a.Nnyeso:</VERS></CHAPTER>
+<CHAPTER cnumber="2"><VERS vnumber="1">Mɛto dwom mama Onyame
+Nneɛma nneɛma sen akɔ,
+na wɔnne me Nyame dɔ.
+3. Ne Bakoro a ɔdɔ no
+Nneɛma nneɛma n.a.</VERS></CHAPTER>
+</BIBLEBOOK></XMLBIBLE>`;
+fs.writeFileSync(path.join(dir, 'TEST_PHB.xml'), zef);
+await page.getByLabel('Hymn files').setInputFiles(path.join(dir, 'TEST_PHB.xml'));
+await page.waitForSelector('text=/Added "Test Twi Hymns": 2 hymns/');
+ok('Zefania hymn book imported (one file, many hymns)', true);
+await page.getByLabel('Find a hymn').fill('1');
+await page.locator('button:has(span.tabular-nums)', { hasText: 'Monkamfo' }).click();
+const zh = await page.locator('.sm\\:grid-cols-2 button').allInnerTexts();
+ok('Zefania: full chorus after every stanza, garbled marks and "n.a." gone', zh.length === 4 && zh[1].includes('Ayeyi nka no') && zh[3].includes('daa daa nyinaa') && !/Nny|n\.a/.test(zh.join()), JSON.stringify(zh));
+ok('Zefania: credits shown under the title', await page.getByText('Dw. 23 · O.A.B., 1964').isVisible());
+await page.getByLabel('All hymns').click();
+await page.getByLabel('Find a hymn').fill('2');
+await page.locator('button:has(span.tabular-nums)', { hasText: 'Mɛto dwom' }).click();
+const z2 = await page.locator('.sm\\:grid-cols-2 button').allInnerTexts();
+ok('Zefania: "3." splits a merged stanza; "n.a." refrain filled from the first stanza', z2.length === 2 && z2[1].includes('na wɔnne me Nyame dɔ') && !z2[1].includes('n.a'), JSON.stringify(z2));
+await page.getByLabel('All hymns').click();
+
 // trial over: hymns need Pro
 await page.evaluate(() => { const d = JSON.parse(localStorage.getItem('osoree-plus')); d.state.trialStart = Math.floor(Date.now() / 1000) - 400 * 86400; localStorage.setItem('osoree-plus', JSON.stringify(d)); });
 await page.reload(); await page.waitForSelector('text=FREE · GET PRO'); await page.waitForTimeout(500);
