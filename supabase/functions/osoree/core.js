@@ -176,7 +176,7 @@ async function fail(d, id, error) { await d.query("update payments set status = 
 
 /** Marks a payment paid (once) and issues its licence. Returns the licence token. */
 async function settle(d, id, providerRef) {
-  const claimed = await d.query("update payments set status = 'paid', paid_at = now(), provider_ref = $2 where id = $1 and status = 'pending' returning *", [id, providerRef || null]);
+  const claimed = await d.query("update payments set status = 'paid', paid_at = now(), provider_ref = $2 where id = $1 and status in ('pending', 'failed') returning *", [id, providerRef || null]);
   if (!claimed.length) {
     const [p] = await d.query('select p.status, l.token from payments p left join licences l on l.id = p.licence_id where p.id = $1', [id]);
     return p?.token || null; // already settled (webhook and app both asked)
@@ -201,7 +201,9 @@ async function verify(d, p) {
     const j = await r.json().catch(() => ({}));
     const t = j.data || {};
     if (t.status === 'success' && Math.round(t.amount) === Math.round(Number(p.amount) * 100) && t.currency === p.currency) return settle(d, p.id, String(t.id));
-    if (t.status === 'failed' || t.status === 'abandoned') await fail(d, p.id, t.gateway_response || t.status);
+    // "abandoned" means the customer has not finished on the Paystack page yet (the app asks while they type),
+    // and a declined card can be retried on the same page: only a reversed payment is final.
+    if (t.status === 'reversed') await fail(d, p.id, t.gateway_response || t.status);
   } else if (p.provider === 'hubtel') {
     const r = await d.fetch(`https://api-txnstatus.hubtel.com/transactions/${d.env('HUBTEL_POS_SALES_ID')}/status?clientReference=${encodeURIComponent(p.id)}`, { headers: { Authorization: `Basic ${btoa(`${d.env('HUBTEL_API_ID')}:${d.env('HUBTEL_API_KEY')}`)}` } });
     const j = await r.json().catch(() => ({}));
@@ -216,7 +218,10 @@ async function verify(d, p) {
 async function buyStatus(d, { ref }) {
   const [p] = await d.query('select p.*, l.token from payments p left join licences l on l.id = p.licence_id where p.id = $1', [String(ref || '')]);
   need(p, 'Payment not found.', 404);
-  if (p.status === 'pending') {
+  // Also re-checks a card payment marked failed in the last 2 hours (older app versions gave up too early).
+  const recent = p.status === 'failed' && p.provider === 'paystack' && d.now() - new Date(p.created_at) < 2 * 3600e3;
+  if (p.status === 'pending' || recent) {
+    if (recent) await d.query("update payments set status = 'pending', error = null where id = $1 and status = 'failed'", [p.id]);
     const token = await verify(d, p);
     if (token) return { status: 'paid', licence: token === 'item' ? undefined : token, item: p.item_id || undefined };
     const [again] = await d.query('select status, error from payments where id = $1', [p.id]);
@@ -231,7 +236,7 @@ async function webhook(d, { p, k, raw, signature, hmac }) {
     need(signature && (await hmac(raw)) === signature, 'bad signature', 401);
     const ev = JSON.parse(raw);
     if (ev.event === 'charge.success') {
-      const [pay] = await d.query("select * from payments where id = $1 and status = 'pending'", [ev.data?.reference]);
+      const [pay] = await d.query("select * from payments where id = $1 and status in ('pending', 'failed')", [ev.data?.reference]);
       if (pay && Math.round(ev.data.amount) === Math.round(Number(pay.amount) * 100) && ev.data.currency === pay.currency) await settle(d, pay.id, String(ev.data.id));
     }
     return { ok: true };

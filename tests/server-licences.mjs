@@ -75,6 +75,26 @@ ok('Paystack webhook → licence with no end date', s2.status === 'paid' && l2.o
 const b3 = await call('buy', { device: C, product: 'pro', phone: '0240000003' });
 fakeProvider.fn = (u) => (u.includes('/verify/') ? { json: { status: true, data: { status: 'success', amount: 35000, currency: 'GHS', id: 7 } } } : {});
 ok('app waiting: server verifies with Paystack', (await call('buy-status', { ref: b3.ref })).status === 'paid');
+// the app asks while the customer is still on the Paystack page: Paystack says "abandoned" — not a failure
+fakeProvider.fn = (u) => (u.includes('/initialize') ? { json: { status: true, data: { authorization_url: 'https://checkout.paystack.com/y' } } } : {});
+const ps4 = await call('buy', { device: C, product: 'year', phone: '0240000003' });
+fakeProvider.fn = (u) => (u.includes('/initialize') ? { json: { status: true, data: { authorization_url: 'https://checkout.paystack.com/y' } } } : u.includes('/verify/') ? { json: { status: true, data: { status: 'abandoned', gateway_response: 'The transaction was not completed' } } } : {});
+ok('customer still paying ("abandoned"): payment stays pending', (await call('buy-status', { ref: ps4.ref })).status === 'pending');
+fakeProvider.fn = (u) => (u.includes('/initialize') ? { json: { status: true, data: { authorization_url: 'https://checkout.paystack.com/y' } } } : u.includes('/verify/') ? { json: { status: true, data: { status: 'failed', gateway_response: 'Declined' } } } : {});
+ok('card declined: still pending (they can try another card)', (await call('buy-status', { ref: ps4.ref })).status === 'pending');
+fakeProvider.fn = (u) => (u.includes('/initialize') ? { json: { status: true, data: { authorization_url: 'https://checkout.paystack.com/y' } } } : u.includes('/verify/') ? { json: { status: true, data: { status: 'success', amount: 25000, currency: 'GHS', id: 8 } } } : {});
+ok('then paid: licence given', (await call('buy-status', { ref: ps4.ref })).status === 'paid');
+// a payment an older server marked failed too early is recovered when Paystack confirms it
+const ps5 = await call('buy', { device: C, product: 'pro', phone: '0240000003' });
+await d.query("update payments set status = 'failed', error = 'The transaction was not completed' where id = $1", [ps5.ref]);
+fakeProvider.fn = (u) => (u.includes('/initialize') ? { json: { status: true, data: { authorization_url: 'https://checkout.paystack.com/y' } } } : {});
+const psEv5 = JSON.stringify({ event: 'charge.success', data: { reference: ps5.ref, amount: 35000, currency: 'GHS', id: 9 } });
+await call('webhook', {}, { p: 'paystack', raw: psEv5, signature: await hmacOf(psEv5), hmac: hmacOf });
+ok('payment marked failed too early: Paystack webhook still gives the licence', (await call('buy-status', { ref: ps5.ref })).status === 'paid');
+const ps6 = await call('buy', { device: C, product: 'pro', phone: '0240000003' });
+await d.query("update payments set status = 'failed', error = 'The transaction was not completed' where id = $1", [ps6.ref]);
+fakeProvider.fn = (u) => (u.includes('/initialize') ? { json: { status: true, data: { authorization_url: 'https://checkout.paystack.com/y' } } } : u.includes('/verify/') ? { json: { status: true, data: { status: 'success', amount: 35000, currency: 'GHS', id: 10 } } } : {});
+ok('payment marked failed too early: the app asking again gets the licence', (await call('buy-status', { ref: ps6.ref })).status === 'paid');
 
 // ---- Hubtel
 await d.query(`update settings set data = data || '{"provider": "hubtel"}'::jsonb`);
@@ -97,7 +117,8 @@ ok('settings saved', st.trialDays === 14 && st.prices.pro === 400 && st.prices.y
 ok('bad settings refused', /Trial/.test((await call('admin/saveSettings', { trialDays: -1 }, { user: admin })).error));
 ok('the app sees the new prices', (await call('config')).prices.pro === 400);
 const ov = await call('admin/overview', {}, { user: admin });
-ok('overview: revenue leaves out test sales', ov.revenue === 1050 && ov.test_sales === 1 && ov.devices >= 1, JSON.stringify(ov));
+// 1050 before the Paystack retry checks, + 250 (year) + 350 + 350 from them
+ok('overview: revenue leaves out test sales', ov.revenue === 2000 && ov.test_sales === 1 && ov.devices >= 1, JSON.stringify(ov));
 
 // ---- activation codes
 const { codes } = await call('admin/createCodes', { product: 'year', count: 1, uses: 2, prefix: 'Grace', church: 'Grace Chapel' }, { user: admin });
